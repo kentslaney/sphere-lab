@@ -1,0 +1,3 @@
+[submodule "sphere-detector"]
+	path = sphere-detector
+	url = git@github.com:kentslaney/sphere-detector.git

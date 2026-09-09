@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Immersive Cube</title>
+  <style>
+    body { margin: 0; background: #101827; color: #edf5ff; font: 16px system-ui, sans-serif; }
+    canvas { display: block; }
+    main { position: absolute; top: 32px; left: 32px; right: 32px; pointer-events: none; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    p { color: #b7c9e0; max-width: 440px; line-height: 1.5; }
+    button { position: absolute; bottom: 32px; left: 50%; transform: translateX(-50%); padding: 14px 28px; border: 0; border-radius: 12px; background: #85d9ff; color: #101827; font: 600 17px system-ui; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: default; }
+  </style>
+
+</head>
+<body>
+  <main>
+    <h1>Immersive Cube</h1>
+    <p>A floating cube, two meters in front of you.</p>
+    <p id="status" role="status">Loading scene…</p>
+  </main>
+  <button id="enter" disabled>Enter VR</button>
+  <canvas id="scene" aria-label="Rotating cube preview"></canvas>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

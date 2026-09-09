@@ -1,0 +1,19 @@
+[package]
+name = "cube-renderer"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wgpu = { version = "=30.0.1", path = "../.build-deps/wgpu", default-features = false, features = ["std", "webgpu", "wgsl"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+glam = "0.30"
+bytemuck = "1"
+console_error_panic_hook = "0.1"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

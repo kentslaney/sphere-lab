@@ -1,0 +1,6 @@
+.local-https/
+__pycache__/
+renderer/target/
+pkg/
+.venv/
+.build-deps/

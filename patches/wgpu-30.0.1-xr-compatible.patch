@@ -1,0 +1,12 @@
+--- a/src/backend/webgpu.rs
++++ b/src/backend/webgpu.rs
+@@ -1682,6 +1682,9 @@
+             )));
+         }
+         let mapped_options = webgpu_sys::GpuRequestAdapterOptions::new();
++        // Local WebXR integration: request an adapter usable by XRGPUBinding.
++        js_sys::Reflect::set(mapped_options.as_ref(), &"xrCompatible".into(), &true.into())
++            .expect("set xrCompatible");
+         let mapped_power_preference = match options.power_preference {
+             wgt::PowerPreference::None => None,
+             wgt::PowerPreference::LowPower => Some(webgpu_sys::GpuPowerPreference::LowPower),
