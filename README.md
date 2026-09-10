@@ -54,6 +54,43 @@ one Wasm thread, so cross-origin isolation is not required. Files remain local t
 the browser; downloads are same-origin model/runtime resources. No CDN is used
 at runtime.
 
+## Remote authentication launcher
+
+With the `login` submodule checked out and your existing
+`login/run/login_secret_session_key` and `login/run/public.pem` in place, run:
+
+```sh
+python3 scripts/run_remote.py
+```
+
+The launcher checks those files before doing setup, creates `.venv` if needed,
+and ensures `login` is installed there as an editable package. It runs the full
+build on the first launch, when build inputs change, or when required outputs
+are missing. Successful builds are recorded in an ignored `.build-deps` stamp.
+Use `--rebuild` to force a build. Browser assets are staged on every launch.
+
+It starts the SSH login-server tunnel on local port 8001, the pubsub client,
+the reverse SSH tunnel from remote port 8081 to local port 8080, and the Flask
+auth server. Existing listeners on local ports 8001 or 8080 cause an error;
+stop manually started copies before launching. Before starting the pubsub client,
+the launcher waits up to 60 seconds for the WebSocket server’s HTTP 426
+upgrade-required response through the local SSH tunnel; a listening TCP port
+alone is not sufficient. It then waits for the pubsub client’s Unix socket to
+accept connections before starting Flask. The probe avoids opening a login
+WebSocket, which would log an error when closed without a login message. SSH uses your usual credentials
+and configuration, detects forwarding failures, and sends keepalives. The remote
+server command gets a PTY so closing SSH sends it a hangup. SSH receives no
+terminal input, and its output is normalized so it cannot change the shared
+terminal’s line handling or print doubled carriage returns.
+
+Ctrl-C (or SIGTERM) sends termination to every managed process group, allows
+8 seconds for graceful shutdown, then kills remaining local group members and
+reaps direct children. Setup/build commands are supervised too. A second signal
+exits immediately without further cleanup, so processes may remain. If any
+service exits unexpectedly, the launcher shuts down the others and reports an
+error. Remote cleanup relies on SSH hangup delivery; it cannot be guaranteed
+through a network failure.
+
 ## Pipeline
 
 - `web/inference-worker.js`: ONNX Runtime Web 1.29.0 with the WebGPU provider runs
