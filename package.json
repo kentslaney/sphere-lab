@@ -1,0 +1,7 @@
+{
+  "name": "sphere-debug-browser",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test tests/*.test.js" },
+  "dependencies": { "onnxruntime-web": "1.29.0" }
+}

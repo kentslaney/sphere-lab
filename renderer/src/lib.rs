@@ -12,6 +12,16 @@ pub struct Renderer {
     bind: wgpu::BindGroup,
     pipeline: Option<wgpu::RenderPipeline>,
     format: Option<wgpu::TextureFormat>,
+    layout: wgpu::BindGroupLayout,
+    cloud: Option<wgpu::Buffer>,
+    cloud_count: u32,
+    lines: Option<wgpu::Buffer>,
+    line_count: u32,
+    point_pipeline: Option<wgpu::RenderPipeline>,
+    line_pipeline: Option<wgpu::RenderPipeline>,
+    yaw: f32,
+    pitch: f32,
+    distance: f32,
 }
 
 fn format(name: &str) -> Result<wgpu::TextureFormat, JsValue> {
@@ -107,6 +117,16 @@ impl Renderer {
             bind,
             pipeline: None,
             format: None,
+            layout,
+            cloud: None,
+            cloud_count: 0,
+            lines: None,
+            line_count: 0,
+            point_pipeline: None,
+            line_pipeline: None,
+            yaw: 0.,
+            pitch: 0.,
+            distance: 2.,
         })
     }
 
@@ -119,6 +139,13 @@ impl Renderer {
         if self.format == Some(color) {
             return Ok(());
         }
+        let pipeline_layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: None,
+                bind_group_layouts: &[Some(&self.layout)],
+                immediate_size: 0,
+            });
         let shader = self
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -129,7 +156,7 @@ impl Renderer {
             self.device
                 .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some("cube pipeline"),
-                    layout: None,
+                    layout: Some(&pipeline_layout),
                     vertex: wgpu::VertexState {
                         module: &shader,
                         entry_point: Some("vs"),
@@ -166,17 +193,128 @@ impl Renderer {
                     cache: None,
                 }),
         );
-        // Auto layouts are pipeline-specific, so rebuild the matching bind group.
-        self.bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &self.pipeline.as_ref().unwrap().get_bind_group_layout(0),
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: self.uniform.as_entire_binding(),
-            }],
-        });
+        let shader = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("cloud shader"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("cloud.wgsl").into()),
+            });
+        for is_point in [true, false] {
+            let pipeline = self
+                .device
+                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some(if is_point {
+                        "point splats"
+                    } else {
+                        "detection annotations"
+                    }),
+                    layout: Some(&pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &shader,
+                        entry_point: Some(if is_point { "point" } else { "line" }),
+                        compilation_options: Default::default(),
+                        buffers: &[Some(wgpu::VertexBufferLayout {
+                            array_stride: 24,
+                            step_mode: if is_point {
+                                wgpu::VertexStepMode::Instance
+                            } else {
+                                wgpu::VertexStepMode::Vertex
+                            },
+                            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
+                        })],
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &shader,
+                        entry_point: Some("color"),
+                        compilation_options: Default::default(),
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: color,
+                            blend: None,
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        topology: if is_point {
+                            wgpu::PrimitiveTopology::TriangleList
+                        } else {
+                            wgpu::PrimitiveTopology::LineList
+                        },
+                        ..Default::default()
+                    },
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: wgpu::TextureFormat::Depth24Plus,
+                        depth_write_enabled: Some(is_point),
+                        depth_compare: Some(if is_point {
+                            wgpu::CompareFunction::LessEqual
+                        } else {
+                            wgpu::CompareFunction::Always
+                        }),
+                        stencil: Default::default(),
+                        bias: Default::default(),
+                    }),
+                    multisample: Default::default(),
+                    multiview_mask: None,
+                    cache: None,
+                });
+            if is_point {
+                self.point_pipeline = Some(pipeline);
+            } else {
+                self.line_pipeline = Some(pipeline);
+            }
+        }
         self.format = Some(color);
         Ok(())
+    }
+
+    pub fn set_cloud(&mut self, points: &[f32]) -> Result<(), JsValue> {
+        if points.len() % 6 != 0
+            || points.len() > 518 * 392 * 6
+            || !points.iter().all(|x| x.is_finite())
+        {
+            return Err(JsValue::from_str("Invalid cloud vertices"));
+        }
+        if points.is_empty() {
+            self.cloud = None;
+            self.cloud_count = 0;
+            return Ok(());
+        }
+        self.cloud = Some(
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("uploaded cloud"),
+                    contents: bytemuck::cast_slice(points),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }),
+        );
+        self.cloud_count = (points.len() / 6) as u32;
+        Ok(())
+    }
+    pub fn set_lines(&mut self, lines: &[f32]) -> Result<(), JsValue> {
+        if lines.len() % 12 != 0
+            || lines.len() > 8 * 3 * 64 * 2 * 6
+            || !lines.iter().all(|x| x.is_finite())
+        {
+            return Err(JsValue::from_str("Invalid annotation vertices"));
+        }
+        self.line_count = (lines.len() / 6) as u32;
+        self.lines = if lines.is_empty() {
+            None
+        } else {
+            Some(
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("sphere annotations"),
+                        contents: bytemuck::cast_slice(lines),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    }),
+            )
+        };
+        Ok(())
+    }
+    pub fn set_pose(&mut self, yaw: f32, pitch: f32, distance: f32) {
+        self.yaw = yaw;
+        self.pitch = pitch;
+        self.distance = distance.clamp(0.6, 5.);
     }
 
     /// Import browser-owned attachments for this frame only; never destroy them.
@@ -235,9 +373,15 @@ impl Renderer {
             .pipeline
             .as_ref()
             .ok_or_else(|| JsValue::from_str("Set format first"))?;
-        let model = Mat4::from_translation(Vec3::new(0., 0., -2.))
-            * Mat4::from_rotation_y(seconds * 0.3)
-            * Mat4::from_rotation_x(0.2 + seconds * 0.15);
+        let model = if self.cloud.is_some() {
+            Mat4::from_translation(Vec3::new(0., 0., -self.distance))
+                * Mat4::from_rotation_y(self.yaw)
+                * Mat4::from_rotation_x(self.pitch)
+        } else {
+            Mat4::from_translation(Vec3::new(0., 0., -2.))
+                * Mat4::from_rotation_y(seconds * 0.3)
+                * Mat4::from_rotation_x(0.2 + seconds * 0.15)
+        };
         let mvp = Mat4::from_cols_slice(projection) * Mat4::from_cols_slice(view) * model;
         let mut uniforms = [0f32; 32];
         uniforms[..16].copy_from_slice(&mvp.to_cols_array());
@@ -274,11 +418,22 @@ impl Renderer {
                 }),
                 ..Default::default()
             });
-            pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &self.bind, &[]);
-            pass.set_vertex_buffer(0, self.vertices.slice(..));
             pass.set_viewport(viewport[0], viewport[1], viewport[2], viewport[3], 0., 1.);
-            pass.draw(0..self.vertex_count, 0..1);
+            if let Some(cloud) = &self.cloud {
+                pass.set_pipeline(self.point_pipeline.as_ref().unwrap());
+                pass.set_vertex_buffer(0, cloud.slice(..));
+                pass.draw(0..6, 0..self.cloud_count);
+                if let Some(lines) = &self.lines {
+                    pass.set_pipeline(self.line_pipeline.as_ref().unwrap());
+                    pass.set_vertex_buffer(0, lines.slice(..));
+                    pass.draw(0..self.line_count, 0..1);
+                }
+            } else {
+                pass.set_pipeline(pipeline);
+                pass.set_vertex_buffer(0, self.vertices.slice(..));
+                pass.draw(0..self.vertex_count, 0..1);
+            }
         }
         // Submit each view before updating the shared uniform for the next eye.
         self.queue.submit([encoder.finish()]);

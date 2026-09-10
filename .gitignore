@@ -4,3 +4,10 @@ renderer/target/
 pkg/
 .venv/
 .build-deps/
+node_modules/
+models/*.onnx
+models/*.vmfb
+models/*.mlir
+models/example.jpg
+runtime/generated/
+tests/generated/

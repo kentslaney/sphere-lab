@@ -1,4 +1,4 @@
-# Rust wgpu / Wasm cube
+# Rust wgpu / Wasm spatial renderer
 
 Build from the project root with `sh scripts/build_wasm.sh`, then run
 `python3 scripts/serve_https.py`. Open
@@ -7,8 +7,10 @@ Install Rust (including `wasm32-unknown-unknown`) and wasm-pack before the first
 Generated browser files live in `pkg/`; the browser needs no CDN dependencies.
 
 `src/lib.rs` owns the wgpu device, geometry, uniforms, pipeline and draw commands.
-`src/cube.wgsl` shades the rotating 0.5-meter cube positioned two meters ahead.
-`../app.js` handles the canvas preview and WebXR session, poses and projection layer.
+`src/cube.wgsl` shades the initial cube; `src/cloud.wgsl` renders uploaded RGB
+point splats and line annotations. `set_cloud`, `set_lines`, and `set_pose` update
+the spatial view without reloading the renderer.
+`../web/viewer.js` handles the canvas preview and WebXR session, poses and projection layer.
 Both paths import browser-owned textures into wgpu without copying or destroying them.
 Each eye is submitted before updating the shared camera uniform for the next eye.
 
