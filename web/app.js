@@ -1,5 +1,5 @@
-import {createViewer} from './web/viewer.js';
-import {WIDTH,HEIGHT,pointCloud,sphereLines,selectDetections,depthRange} from './web/geometry.js';
+import {createViewer} from './viewer.js';
+import {WIDTH,HEIGHT,pointCloud,sphereLines,selectDetections,depthRange} from './geometry.js';
 const $=id=>document.getElementById(id);
 let viewer=null, worker=null, job=0, rgba=null, depth=null, candidates=null, range=null;
 let selected=[], sourceName='', depthMs=0, detectorMs=0, busy=false;
@@ -52,7 +52,7 @@ function paintDepth() {
 }
 function startWorker(){
   if(worker) return;
-  worker=new Worker(new URL('./web/inference-worker.js',import.meta.url),{type:'module'});
+  worker=new Worker(new URL('./inference-worker.js',import.meta.url),{type:'module'});
   worker.onmessage=({data})=>{
     if(data.id!==job) return;
     try {
@@ -99,7 +99,7 @@ async function analyze(blob,name){
 $('file').addEventListener('change',()=>{const file=$('file').files[0];if(file)analyze(file,file.name);$('file').value='';});
 $('example').addEventListener('click',async()=>{
   if(busy)return;
-  try{const response=await fetch('./models/example.jpg');if(!response.ok)throw new Error('Example missing; run sh scripts/build_pipeline.sh');await analyze(await response.blob(),'Example photo');}
+  try{const response=await fetch(new URL('./models/example.jpg', import.meta.url));if(!response.ok)throw new Error('Example missing; run sh scripts/build_pipeline.sh');await analyze(await response.blob(),'Example photo');}
   catch(error){status(error.message,true);}
 });
 $('cancel').addEventListener('click',()=>{++job;worker?.terminate();worker=null;controls(false);for(const el of document.querySelectorAll('.stages .active'))el.classList.remove('active');status('Canceled. Choose another image to start again.');$('result-heading').textContent=depth?'Depth ready · detection canceled':'Canceled';});

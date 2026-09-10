@@ -17,6 +17,22 @@ sh scripts/build_pipeline.sh
 python3 scripts/serve_https.py
 ```
 
+The page and app entry point live in `web/index.html` and `web/app.js`; renderer
+builds write generated Wasm files to `web/pkg/`. Both Python servers serve only
+`web/`; open `/` or `/index.html`. `scripts/stage_web.py` copies the models,
+example, IREE runtime, and ONNX Runtime distribution into ignored directories
+inside `web/`. The full build and both server startup paths run this staging
+step automatically. After rebuilding individual inference components while a
+server is running, run `python3 scripts/stage_web.py` to refresh those copies.
+
+Browser asset URLs resolve relative to the page or importing module, so nginx
+can strip a public prefix before proxying. Open the public URL with a trailing
+slash (for example `/sphere/`) or with `index.html` (`/sphere/index.html`).
+Configure nginx to redirect `/sphere` to `/sphere/`; without the trailing slash,
+the browser resolves relative assets beside the prefix instead of inside it.
+The authenticated server disables Flask's default-route canonical redirects so
+requests for `index.html` retain the public prefix.
+
 The first build downloads the 99 MB ONNX model and pinned build dependencies.
 Follow the HTTPS server's printed certificate installation URL on Vision Pro,
 install the profile, and enable full trust for the root CA in Settings → General

@@ -8,5 +8,6 @@ npm ci --ignore-scripts
 .venv/bin/python scripts/prepare_depth.py
 sh scripts/build_detector.sh
 sh scripts/build_wasm.sh
+python3 scripts/stage_web.py
 .venv/bin/python scripts/validate_detector.py
 npm test

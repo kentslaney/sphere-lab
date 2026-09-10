@@ -4,7 +4,7 @@ Build from the project root with `sh scripts/build_wasm.sh`, then run
 `python3 scripts/serve_https.py`. Open
 `https://Kents-MacBook-Pro.local:8443/index.html` on Vision Pro.
 Install Rust (including `wasm32-unknown-unknown`) and wasm-pack before the first build.
-Generated browser files live in `pkg/`; the browser needs no CDN dependencies.
+Generated browser files live in `web/pkg/`; the browser needs no CDN dependencies.
 
 `src/lib.rs` owns the wgpu device, geometry, uniforms, pipeline and draw commands.
 `src/cube.wgsl` shades the initial cube; `src/cloud.wgsl` renders uploaded RGB

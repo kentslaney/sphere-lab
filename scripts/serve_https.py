@@ -14,6 +14,7 @@ import urllib.parse
 import uuid
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+WEB = ROOT / 'web'
 CERTS = ROOT / '.local-https'
 HOSTNAME = socket.getfqdn()
 
@@ -70,7 +71,7 @@ def ensure_certificates():
 class Site(http.server.SimpleHTTPRequestHandler):
     def send_head(self):
         path = pathlib.Path(self.translate_path(self.path)).resolve()
-        if not path.is_relative_to(ROOT) or any(p.startswith('.') for p in path.relative_to(ROOT).parts):
+        if not path.is_relative_to(WEB) or any(p.startswith('.') for p in path.relative_to(WEB).parts):
             self.send_error(404)
             return None
         return super().send_head()
@@ -92,10 +93,12 @@ class CertificateDownload(http.server.BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 if __name__ == '__main__':
+    from stage_web import stage_web
+    stage_web()
     ensure_certificates()
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(CERTS / 'server.pem', CERTS / 'server-key.pem')
-    https = http.server.ThreadingHTTPServer(('0.0.0.0', 8443), functools.partial(Site, directory=str(ROOT)))
+    https = http.server.ThreadingHTTPServer(('0.0.0.0', 8443), functools.partial(Site, directory=str(WEB)))
     https.socket = context.wrap_socket(https.socket, server_side=True)
     bootstrap = http.server.ThreadingHTTPServer(('0.0.0.0', 8001), CertificateDownload)
     threading.Thread(target=bootstrap.serve_forever, daemon=True).start()

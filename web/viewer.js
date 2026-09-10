@@ -10,7 +10,7 @@ const report = error => {
 try {
   if (!isSecureContext) throw new Error('Open this page over trusted HTTPS.');
   if (!navigator.gpu) throw new Error('WebGPU is unavailable. Use Safari on visionOS 26.2 or later.');
-  const { default: init, Renderer } = await import('../pkg/cube_renderer.js');
+  const { default: init, Renderer } = await import('./pkg/cube_renderer.js');
   await init();
   const renderer = await Renderer.create();
   const device = renderer.gpu_device();

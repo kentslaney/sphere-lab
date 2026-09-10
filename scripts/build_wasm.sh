@@ -6,4 +6,4 @@ if [ -d /opt/homebrew/opt/rustup/bin ]; then
   export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
 fi
 python3 scripts/prepare_wgpu.py
-wasm-pack build renderer --target web --out-dir ../pkg --release --locked
+wasm-pack build renderer --target web --out-dir ../web/pkg --release --locked

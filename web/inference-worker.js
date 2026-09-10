@@ -1,7 +1,7 @@
-import * as ort from '../node_modules/onnxruntime-web/dist/ort.webgpu.min.mjs';
+import * as ort from './vendor/onnxruntime/ort.webgpu.min.mjs';
 import {WIDTH,HEIGHT,normalizeImage,resizeDepth} from './geometry.js';
 let depthSession, runtime, graphPointer;
-ort.env.wasm.wasmPaths = new URL('../node_modules/onnxruntime-web/dist/',import.meta.url).href;
+ort.env.wasm.wasmPaths = new URL('./vendor/onnxruntime/',import.meta.url).href;
 ort.env.wasm.numThreads=1;
 ort.env.wasm.proxy=false;
 const progress=(id,stage,message)=>postMessage({id,type:'progress',stage,message});
@@ -26,16 +26,19 @@ async function fetchFile(url,id,label) {
 async function loadDepth(id) {
   if(depthSession) return;
   if(!navigator.gpu) throw new Error('WebGPU is unavailable in this browser worker. Use a current Safari or Chrome.');
-  const model=await fetchFile(new URL('../models/depth-anything-v2-small.onnx',import.meta.url),id,'Depth Anything V2 Small');
+  const model=await fetchFile(new URL('./models/depth-anything-v2-small.onnx',import.meta.url),id,'Depth Anything V2 Small');
   progress(id,'loading','Creating ONNX WebGPU session…');
   depthSession=await ort.InferenceSession.create(model,{executionProviders:['webgpu'],graphOptimizationLevel:'all'});
 }
 async function loadDetector(id) {
   if(runtime) return;
   progress(id,'detecting','Loading sphere-detector Wasm runtime…');
-  const {default:createRuntime}=await import('../runtime/generated/sphere_runtime.mjs');
-  const loaded=await createRuntime({print:()=>{},printErr:message=>console.warn(message)});
-  const graph=await fetchFile(new URL('../models/sphere-detector.vmfb',import.meta.url),id,'Sphere detector');
+  const {default:createRuntime}=await import('./runtime/generated/sphere_runtime.mjs');
+  const loaded=await createRuntime({
+    locateFile: name => new URL(`./runtime/generated/${name}`, import.meta.url).href,
+    print:()=>{},printErr:message=>console.warn(message),
+  });
+  const graph=await fetchFile(new URL('./models/sphere-detector.vmfb',import.meta.url),id,'Sphere detector');
   const ptr=loaded._malloc(graph.length);
   if(!ptr) throw new Error('Could not allocate detector graph memory.');
   loaded.HEAPU8.set(graph,ptr);

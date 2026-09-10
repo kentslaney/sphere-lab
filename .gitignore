@@ -1,7 +1,7 @@
 .local-https/
 __pycache__/
 renderer/target/
-pkg/
+/web/pkg/
 .venv/
 .build-deps/
 node_modules/
@@ -11,3 +11,7 @@ models/*.mlir
 models/example.jpg
 runtime/generated/
 tests/generated/
+
+/web/models/
+/web/runtime/
+/web/vendor/
