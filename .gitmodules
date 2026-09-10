@@ -1,3 +1,6 @@
 [submodule "sphere-detector"]
 	path = sphere-detector
 	url = git@github.com:kentslaney/sphere-detector.git
+[submodule "login"]
+	path = login
+	url = git@github.com:kentslaney/login.git

@@ -27,7 +27,7 @@ reissued and any new root trusted on the headset.
 Select **Choose an image** or **Try example photo**. The analysis uses a center
 crop at 518 × 392; the left preview shows exactly what is analyzed. Depth is shown
 as soon as ONNX completes, before the detector runs. Drag the point cloud to orbit,
-scroll to zoom, or select **Enter VR** on a compatible headset. Adjust the score
+scroll to zoom, or select **Enter VR** on a compatible headset. In VR, pinch and hold with one hand to move the cloud. Pinch with both hands to scale and rotate around the grab points; release to leave it in place. Scaling is limited to 0.1–10×. Missing hand tracking pauses the gesture and rebases on recovery. **Reset view** restores placement, rotation, and scale after exiting VR. Adjust the score
 threshold, depth spread, and detection visibility. **Export results** saves the
 raw candidates, filtered image detections, settings, and timings as JSON.
 **Cancel** terminates the inference worker; a later job creates a fresh runtime.

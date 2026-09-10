@@ -1,3 +1,5 @@
+import { CloudGrab, attachCloudGrab } from './xr-grab.js';
+
 export async function createViewer(canvas, button, status) {
 const identity = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
 const report = error => {
@@ -14,6 +16,13 @@ try {
   const device = renderer.gpu_device();
   const context = canvas.getContext('webgpu');
   const canvasFormat = navigator.gpu.getPreferredCanvasFormat();
+  const grab = new CloudGrab();
+  let yaw=0,pitch=0,distance=2,drag=null;
+  const applyGrab = () => {
+    renderer.set_grab(grab.position[0], grab.position[1], grab.position[2] + distance, grab.scale);
+    renderer.set_grab_rotation(new Float32Array(grab.rotation));
+  };
+  const pose = () => { renderer.set_pose(yaw,pitch,distance); applyGrab(); };
   let session = null;
   let stopped = false;
   let depth = null;
@@ -65,7 +74,7 @@ try {
   if (!navigator.xr || !globalThis.XRGPUBinding || !await navigator.xr.isSessionSupported('immersive-vr')) {
     status.textContent = 'Drag to orbit · Scroll to zoom · VR requires a compatible headset.';
   } else {
-    status.textContent = 'Drag to orbit · Scroll to zoom · Enter VR on your headset.';
+    status.textContent = 'Drag to orbit · Scroll to zoom · VR: one pinch to move · Two pinches to scale.';
     button.disabled = false;
     button.addEventListener('click', async () => {
       button.disabled = true;
@@ -92,10 +101,13 @@ try {
           const space = await active.requestReferenceSpace('local');
           if (session !== active) return;
           button.textContent = 'Exit VR';
-          status.textContent = 'Immersive VR is active.';
+          status.textContent = 'VR: pinch and move to grab · Pinch with both hands and spread to scale.';
+          grab.release();
+          const updateGrab = attachCloudGrab(active, space, grab, applyGrab);
           function frame(time, xrFrame) {
             if (session !== active || stopped) return;
             try {
+              updateGrab(xrFrame);
               const pose = xrFrame.getViewerPose(space);
               if (pose) {
                 for (const view of pose.views) {
@@ -124,8 +136,6 @@ try {
       finally { button.disabled = stopped; }
     });
   }
-  let yaw=0,pitch=0,distance=2,drag=null;
-  const pose=()=>renderer.set_pose(yaw,pitch,distance);
   canvas.addEventListener('pointerdown',event=>{
     drag=[event.clientX,event.clientY];canvas.setPointerCapture(event.pointerId);
   });
@@ -136,11 +146,11 @@ try {
     drag=[event.clientX,event.clientY];pose();
   });
   for(const type of ['pointerup','pointercancel','lostpointercapture']) canvas.addEventListener(type,()=>drag=null);
-  canvas.addEventListener('wheel',event=>{event.preventDefault();distance=Math.max(0.6,Math.min(5,distance+event.deltaY*0.002));pose();},{passive:false});
+  canvas.addEventListener('wheel',event=>{event.preventDefault();distance=Math.max(0.6,Math.min(5,distance+event.deltaY*0.002));grab.position[2]=-distance;pose();},{passive:false});
   return {
     setCloud:points=>renderer.set_cloud(points),
     setLines:lines=>renderer.set_lines(lines),
-    reset:()=>{yaw=0;pitch=0;distance=2;pose();},
+    reset:()=>{yaw=0;pitch=0;distance=2;grab.reset();pose();},
     clear:()=>{renderer.set_cloud(new Float32Array());renderer.set_lines(new Float32Array());},
   };
 } catch (error) {

@@ -1,4 +1,4 @@
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Quat, Vec3};
 use wasm_bindgen::prelude::*;
 use wgpu::util::DeviceExt;
 
@@ -22,6 +22,9 @@ pub struct Renderer {
     yaw: f32,
     pitch: f32,
     distance: f32,
+    offset: Vec3,
+    grab_rotation: Quat,
+    scale: f32,
 }
 
 fn format(name: &str) -> Result<wgpu::TextureFormat, JsValue> {
@@ -127,6 +130,9 @@ impl Renderer {
             yaw: 0.,
             pitch: 0.,
             distance: 2.,
+            offset: Vec3::ZERO,
+            grab_rotation: Quat::IDENTITY,
+            scale: 1.,
         })
     }
 
@@ -317,6 +323,22 @@ impl Renderer {
         self.distance = distance.clamp(0.6, 5.);
     }
 
+    pub fn set_grab(&mut self, x: f32, y: f32, z: f32, scale: f32) {
+        if [x, y, z, scale].iter().all(|v| v.is_finite()) {
+            self.offset = Vec3::new(x, y, z);
+            self.scale = scale.clamp(0.1, 10.);
+        }
+    }
+
+    pub fn set_grab_rotation(&mut self, q: &[f32]) {
+        if q.len() == 4 && q.iter().all(|v| v.is_finite()) {
+            let rotation = Quat::from_xyzw(q[0], q[1], q[2], q[3]);
+            if rotation.length_squared() > 0.0001 {
+                self.grab_rotation = rotation.normalize();
+            }
+        }
+    }
+
     /// Import browser-owned attachments for this frame only; never destroy them.
     fn attachment(&self, value: JsValue, layer: u32) -> Result<wgpu::TextureView, JsValue> {
         let texture: wgpu::webgpu::GpuTexture = value.unchecked_into();
@@ -374,9 +396,11 @@ impl Renderer {
             .as_ref()
             .ok_or_else(|| JsValue::from_str("Set format first"))?;
         let model = if self.cloud.is_some() {
-            Mat4::from_translation(Vec3::new(0., 0., -self.distance))
+            Mat4::from_translation(Vec3::new(0., 0., -self.distance) + self.offset)
+                * Mat4::from_quat(self.grab_rotation)
                 * Mat4::from_rotation_y(self.yaw)
                 * Mat4::from_rotation_x(self.pitch)
+                * Mat4::from_scale(Vec3::splat(self.scale))
         } else {
             Mat4::from_translation(Vec3::new(0., 0., -2.))
                 * Mat4::from_rotation_y(seconds * 0.3)
