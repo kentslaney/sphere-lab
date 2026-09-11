@@ -6,5 +6,5 @@
   "output": "[8,7]: confidence, y_min, x_min, y_max, x_max, center_depth, depth_scale",
   "entry": "main",
   "runtime": "IREE VMVX",
-  "sourceRevision": "0e28468d657c02ffd18b9bc9c51dfcf4a90fe97e"
+  "sourceRevision": "42094e8616c1e5793741854ec3bdaa59647e2aa9"
 }

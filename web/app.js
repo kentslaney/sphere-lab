@@ -1,5 +1,5 @@
 import {createViewer} from './viewer.js';
-import {WIDTH,HEIGHT,pointCloud,sphereLines,selectDetections,depthRange,cloudBounds,scaleBarLines,computeViewportPinchScale} from './geometry.js';
+import {WIDTH,HEIGHT,pointCloud,sphereLines,selectDetections,depthRange,cloudBounds,computeViewportPinchScale} from './geometry.js';
 const $=id=>document.getElementById(id);
 let viewer=null, worker=null, job=0, rgba=null, depth=null, candidates=null, range=null, bounds=null, cloudVertices=null;
 let selected=[], sourceName='', depthMs=0, detectorMs=0, busy=false;
@@ -39,10 +39,6 @@ function rebuild(updateCloud=true) {
     $('point-count').textContent=`${(cloud.vertices.length/6).toLocaleString()} POINTS`;
   }
   const allLines=[];
-  if(bounds&&$('scale-legend')?.checked) {
-    const bar=scaleBarLines(bounds);
-    for(let i=0;i<bar.length;i++) allLines.push(bar[i]);
-  }
   selected=candidates?selectDetections(candidates,threshold):[];
   if(viewer&&$('outlines').checked&&selected.length) {
     const outlines=sphereLines(selected,depth,range,spread);
