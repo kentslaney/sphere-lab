@@ -25,7 +25,6 @@ function rebuild(updateCloud=true) {
     for(let i=0;i<outlines.length;i++) allLines.push(outlines[i]);
   }
   if(viewer)viewer.setLines(new Float32Array(allLines));
-  updateScaleKey();
   photo.putImageData(new ImageData(rgba,WIDTH,HEIGHT),0,0);
   photo.strokeStyle='#ffcc66';photo.lineWidth=2;
   photo.font='bold 15px system-ui';
@@ -83,7 +82,6 @@ async function analyze(blob,name){
   if(busy) return;
   controls(true);const currentJob=++job;
   sourceName=name;rgba=null;depth=null;candidates=null;selected=[];bounds=null;cloudVertices=null;
-  updateScaleKey();
   $('download').disabled=true;$('timing').textContent='';$('result-heading').textContent='Analyzing photo';
   $('results').replaceChildren();$('point-count').textContent='WAITING FOR DEPTH';
   for(const id of ['depth','cloud','detect'])stage(id,'');
