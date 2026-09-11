@@ -1,18 +1,39 @@
 import {createViewer} from './viewer.js';
-import {WIDTH,HEIGHT,pointCloud,sphereLines,selectDetections,depthRange,cloudBounds,scaleBarLines} from './geometry.js';
+import {WIDTH,HEIGHT,pointCloud,sphereLines,selectDetections,depthRange,cloudBounds,scaleBarLines,computeViewportPinchScale} from './geometry.js';
 const $=id=>document.getElementById(id);
-let viewer=null, worker=null, job=0, rgba=null, depth=null, candidates=null, range=null, bounds=null;
+let viewer=null, worker=null, job=0, rgba=null, depth=null, candidates=null, range=null, bounds=null, cloudVertices=null;
 let selected=[], sourceName='', depthMs=0, detectorMs=0, busy=false;
 const photo=$('photo').getContext('2d'),depthCanvas=$('depth').getContext('2d');
 function status(message,error=false){$('status').textContent=message;$('status').classList.toggle('error',error);}
 function controls(running){busy=running;$('file').disabled=running;$('example').disabled=running;$('cancel').hidden=!running;}
 function stage(id,state){$(`stage-${id}`).className=state;}
+function updateScaleKey() {
+  const key=$('scale-key');
+  if(!key) return;
+  const isEnabled=$('scale-legend')?.checked && cloudVertices;
+  if(!isEnabled) { key.hidden=true; return; }
+  key.hidden=false;
+  const cam=viewer?.getCamera()||{yaw:0,pitch:0,distance:2,scale:1};
+  const scene=$('scene');
+  const info=computeViewportPinchScale(cloudVertices,{
+    yaw:cam.yaw,
+    pitch:cam.pitch,
+    distance:cam.distance,
+    scale:cam.scale,
+    width:scene.clientWidth||WIDTH,
+    height:scene.clientHeight||HEIGHT,
+  });
+  $('scale-key-depth').textContent=`Depth ${info.avgDepth.toFixed(2)} m`;
+  $('scale-bar-line').style.width=`${Math.round(info.barWidthPx)}px`;
+  $('scale-bar-label').textContent=info.label;
+}
 function rebuild(updateCloud=true) {
   if(!depth||!rgba) return;
   const spread=Number($('spread').value), threshold=Number($('threshold').value);
   if(updateCloud) {
     const cloud=pointCloud(depth,rgba,spread);
     range=cloud.range;
+    cloudVertices=cloud.vertices;
     bounds=cloudBounds(cloud.vertices);
     if(viewer)viewer.setCloud(cloud.vertices);
     $('point-count').textContent=`${(cloud.vertices.length/6).toLocaleString()} POINTS`;
@@ -28,6 +49,7 @@ function rebuild(updateCloud=true) {
     for(let i=0;i<outlines.length;i++) allLines.push(outlines[i]);
   }
   if(viewer)viewer.setLines(new Float32Array(allLines));
+  updateScaleKey();
   photo.putImageData(new ImageData(rgba,WIDTH,HEIGHT),0,0);
   photo.strokeStyle='#ffcc66';photo.lineWidth=2;
   photo.font='bold 15px system-ui';
@@ -84,7 +106,8 @@ function startWorker(){
 async function analyze(blob,name){
   if(busy) return;
   controls(true);const currentJob=++job;
-  sourceName=name;rgba=null;depth=null;candidates=null;selected=[];bounds=null;
+  sourceName=name;rgba=null;depth=null;candidates=null;selected=[];bounds=null;cloudVertices=null;
+  updateScaleKey();
   $('download').disabled=true;$('timing').textContent='';$('result-heading').textContent='Analyzing photo';
   $('results').replaceChildren();$('point-count').textContent='WAITING FOR DEPTH';
   for(const id of ['depth','cloud','detect'])stage(id,'');
@@ -115,8 +138,9 @@ $('cancel').addEventListener('click',()=>{++job;worker?.terminate();worker=null;
 for(const id of ['spread','threshold'])$(''+id).addEventListener('input',()=>{
   $(`${id}-value`).value=Number($(id).value).toFixed(2);rebuild(id==='spread');
 });
-$('scale-legend').addEventListener('change',()=>rebuild(false));
+$('scale-legend').addEventListener('change',()=>{rebuild(false);updateScaleKey();});
 $('outlines').addEventListener('change',()=>rebuild(false));
+window.addEventListener('resize',()=>updateScaleKey());
 $('reset').addEventListener('click',()=>viewer?.reset());
 $('download').addEventListener('click',()=>{
   if(!candidates)return;
@@ -129,5 +153,9 @@ $('download').addEventListener('click',()=>{
   const url=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'}));
   const link=document.createElement('a');link.href=url;link.download='sphere-results.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 });
-try {viewer=await createViewer($('scene'),$('enter'),$('viewer-status'));if(depth)rebuild();}
+try {
+  viewer=await createViewer($('scene'),$('enter'),$('viewer-status'));
+  viewer.onPose(()=>updateScaleKey());
+  if(depth)rebuild();
+}
 catch(error){$('viewer-status').textContent=`3D view unavailable: ${error.message}`;}

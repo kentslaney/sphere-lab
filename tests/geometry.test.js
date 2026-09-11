@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {sphereLines,normalizeImage,resizeDepth,selectDetections,pointCloud,pointAt,displayZ,WIDTH,HEIGHT,cloudBounds,scaleBarLines} from '../web/geometry.js';
+import {sphereLines,normalizeImage,resizeDepth,selectDetections,pointCloud,pointAt,displayZ,WIDTH,HEIGHT,cloudBounds,scaleBarLines,computeViewportPinchScale} from '../web/geometry.js';
 test('RGB normalization is NCHW and uses ImageNet values',()=>{
   const out=normalizeImage(new Uint8ClampedArray([255,0,128,255,0,255,0,255]),2,1);
   assert.equal(out.length,6);
@@ -81,4 +81,30 @@ test('scaleBarLines produces map-style single axis scale bar with calibrated len
 
   // Baseline is centered horizontally on the cloud bounds
   assert.ok(Math.abs((startX + endX) / 2 - (bounds.minX + bounds.maxX) / 2) < 1e-6);
+});
+
+test('computeViewportPinchScale calculates average depth and scales with camera distance',()=>{
+  // A point in the bottom-left quadrant
+  const points = new Float32Array([
+    -0.5, -0.4, 0.0, 1, 1, 1,
+  ]);
+  const res1 = computeViewportPinchScale(points, {
+    yaw: 0, pitch: 0, distance: 2.0, width: 800, height: 490
+  });
+  assert.ok(Number.isFinite(res1.avgDepth));
+  assert.ok(Math.abs(res1.avgDepth - 2.0) < 0.1);
+  assert.ok(res1.barWidthPx > 0);
+  assert.ok(res1.realWorldDistance > 0);
+  assert.ok(typeof res1.label === 'string');
+
+  // Zoomed in closer: distance 1.0 m -> pxPerMeter should double
+  const res2 = computeViewportPinchScale(points, {
+    yaw: 0, pitch: 0, distance: 1.0, width: 800, height: 490
+  });
+  assert.ok(res2.pxPerMeter > res1.pxPerMeter);
+
+  // Fallback with empty points
+  const fallback = computeViewportPinchScale(null, { distance: 2.5 });
+  assert.equal(fallback.avgDepth, 2.5);
+  assert.ok(fallback.barWidthPx > 0);
 });

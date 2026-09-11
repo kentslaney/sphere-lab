@@ -197,3 +197,95 @@ export function scaleBarLines(bounds, barLength = 0.5, divisions = 5) {
   return new Float32Array(lines);
 }
 
+export function computeViewportPinchScale(points, {
+  yaw = 0,
+  pitch = 0,
+  distance = 2,
+  scale = 1,
+  width = 800,
+  height = 490,
+  fovy = 65,
+  targetPinchPx = 80,
+  area = null
+} = {}) {
+  const f = 1 / Math.tan((fovy * Math.PI) / 360);
+  const aspect = Math.max(0.001, width / Math.max(1, height));
+  const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
+  const cosY = Math.cos(yaw), sinY = Math.sin(yaw);
+
+  // Default target area: bottom-left region of the viewport where the scale key sits
+  const minX = area?.minX ?? 0;
+  const maxX = area?.maxX ?? width * 0.45;
+  const minY = area?.minY ?? height * 0.55;
+  const maxY = area?.maxY ?? height;
+
+  let totalDepth = 0, count = 0;
+  let allDepth = 0, allCount = 0;
+
+  if (points && points.length >= 6) {
+    const step = Math.max(1, Math.floor(points.length / (6 * 2000))) * 6;
+    for (let i = 0; i < points.length; i += step) {
+      const x = points[i], y = points[i + 1], z = points[i + 2];
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+
+      // Model transform: rotate by pitch around X, then yaw around Y, then scale
+      const y1 = y * cosP - z * sinP;
+      const z1 = y * sinP + z * cosP;
+
+      const x2 = x * cosY + z1 * sinY;
+      const z2 = -x * sinY + z1 * cosY;
+
+      const xCam = x2 * scale;
+      const yCam = y1 * scale;
+      const zCam = z2 * scale - distance;
+      const d = -zCam;
+      if (d <= 0.05) continue;
+
+      allDepth += d;
+      allCount++;
+
+      // Project to screen
+      const xClip = (xCam * (f / aspect)) / d;
+      const yClip = (yCam * f) / d;
+      const px = (xClip + 1) * (width / 2);
+      const py = (1 - yClip) * (height / 2);
+
+      if (px >= minX && px <= maxX && py >= minY && py <= maxY) {
+        totalDepth += d;
+        count++;
+      }
+    }
+  }
+
+  const avgDepth = count > 0 ? totalDepth / count : (allCount > 0 ? allDepth / allCount : distance);
+  const pxPerMeter = (f * height) / (2 * Math.max(0.05, avgDepth));
+
+  // Desired pinch size in screen pixels (~80px) converted to real-world meters
+  const rawMeters = targetPinchPx / Math.max(1e-6, pxPerMeter);
+
+  // Round to nearest clean metric increment
+  const steps = [0.01, 0.02, 0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 5, 10];
+  let chosenMeters = steps[0];
+  let minDiff = Infinity;
+  for (const s of steps) {
+    const diff = Math.abs(Math.log(rawMeters / s));
+    if (diff < minDiff) {
+      minDiff = diff;
+      chosenMeters = s;
+    }
+  }
+
+  const barWidthPx = Math.max(20, Math.min(width * 0.5, chosenMeters * pxPerMeter));
+  const label = chosenMeters < 1 ? `${Math.round(chosenMeters * 100)} cm` : `${chosenMeters} m`;
+
+  return {
+    avgDepth,
+    pxPerMeter,
+    realWorldDistance: chosenMeters,
+    barWidthPx,
+    label,
+    count
+  };
+}
+
+

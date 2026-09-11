@@ -23,7 +23,12 @@ try {
     renderer.set_grab(grab.position[0], grab.position[1], grab.position[2] + distance, grab.scale);
     renderer.set_grab_rotation(new Float32Array(grab.rotation));
   };
-  const pose = () => { renderer.set_pose(yaw,pitch,distance); applyGrab(); };
+  const onPoseCallbacks = [];
+  const notifyPose = () => {
+    const cam = { yaw, pitch, distance, scale: grab.scale };
+    for (const cb of onPoseCallbacks) cb(cam);
+  };
+  const pose = () => { renderer.set_pose(yaw,pitch,distance); applyGrab(); notifyPose(); };
   let session = null;
   let stopped = false;
   let depth = null;
@@ -156,6 +161,8 @@ try {
     setLines:lines=>renderer.set_lines(lines),
     reset:()=>{yaw=0;pitch=0;distance=2;grab.reset();pose();},
     clear:()=>{renderer.set_cloud(new Float32Array());renderer.set_lines(new Float32Array());},
+    getCamera:()=>({yaw,pitch,distance,scale:grab.scale}),
+    onPose:cb=>{onPoseCallbacks.push(cb);cb({yaw,pitch,distance,scale:grab.scale});},
   };
 } catch (error) {
   report(error);
