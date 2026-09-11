@@ -54,6 +54,27 @@ one Wasm thread, so cross-origin isolation is not required. Files remain local t
 the browser; downloads are same-origin model/runtime resources. No CDN is used
 at runtime.
 
+## GitHub Pages
+
+`.github/workflows/pages.yml` builds and validates the app on pushes to `main`
+and manual runs, then publishes only `web/` using GitHub Pages Actions deployment.
+The workflow installs Python, Node, Rust, wasm-pack, Emscripten, and native build
+tools and runs the same `scripts/build_pipeline.sh` used locally. Generated models
+and runtime files are uploaded as a Pages artifact; they do not belong in Git.
+Only the public `sphere-detector` submodule is checked out, over HTTPS.
+
+In the repository's **Settings → Pages → Build and deployment**, select
+**GitHub Actions** as the source, then push this workflow to `main`. You can also
+start **Deploy GitHub Pages** from the Actions tab. The expected site URL is
+<https://kentslaney.github.io/sphere-debug/>. Keep the trailing slash so relative
+asset URLs resolve correctly. See GitHub's [custom workflow documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).
+
+Pages serves the static app over HTTPS, without the remote authentication
+launcher. The published app and its model/example assets are publicly accessible;
+selected photos are still processed locally in the browser. Hosting from a
+private repository requires a GitHub plan that supports Pages for private repos.
+WebGPU and WebXR browser requirements remain the same as for local hosting.
+
 ## Remote authentication launcher
 
 With the `login` submodule checked out and your existing
