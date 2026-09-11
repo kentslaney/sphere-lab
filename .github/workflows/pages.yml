@@ -13,7 +13,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  check-pages:
+    if: github.repository == 'kentslaney/sphere-lab' && github.event.repository.private == false && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: read
+    outputs:
+      enabled: ${{ steps.pages.outputs.enabled }}
+    steps:
+      - name: Check Pages publishing source
+        id: pages
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.setOutput('enabled', 'false');
+            try {
+              const { data } = await github.rest.repos.getPages(context.repo);
+              if (data.build_type === 'workflow') {
+                core.setOutput('enabled', 'true');
+              } else {
+                core.notice('Skipping deployment: Pages source must be GitHub Actions.');
+              }
+            } catch (error) {
+              if (error.status === 403 || error.status === 404) {
+                core.notice('Skipping deployment: Pages is unavailable or inaccessible.');
+              } else {
+                throw error;
+              }
+            }
+
   build:
+    needs: check-pages
+    if: needs.check-pages.outputs.enabled == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -60,7 +91,7 @@ jobs:
 
   deploy:
     needs: build
-    if: github.ref == 'refs/heads/main'
+    if: github.repository == 'kentslaney/sphere-lab' && github.event.repository.private == false && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:
       pages: write
