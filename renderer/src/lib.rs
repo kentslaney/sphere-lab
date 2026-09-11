@@ -24,6 +24,11 @@ pub struct Renderer {
     shell_pipeline: Option<wgpu::RenderPipeline>,
     feedback_uniform: wgpu::Buffer,
     feedback_bind: wgpu::BindGroup,
+    hud: wgpu::Buffer,
+    hud_count: u32,
+    hud_pipeline: Option<wgpu::RenderPipeline>,
+    hud_uniform: wgpu::Buffer,
+    hud_bind: wgpu::BindGroup,
     yaw: f32,
     pitch: f32,
     distance: f32,
@@ -136,6 +141,26 @@ impl Renderer {
                 resource: feedback_uniform.as_entire_binding(),
             }],
         });
+        let hud = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("hud vertices"),
+            size: 65536,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let hud_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("hud view transform"),
+            size: 128,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let hud_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("hud overlay"),
+            layout: &layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: hud_uniform.as_entire_binding(),
+            }],
+        });
         Ok(Self {
             device,
             queue,
@@ -157,6 +182,11 @@ impl Renderer {
             shell_pipeline: None,
             feedback_uniform,
             feedback_bind,
+            hud,
+            hud_count: 0,
+            hud_pipeline: None,
+            hud_uniform,
+            hud_bind,
             yaw: 0.,
             pitch: 0.,
             distance: 2.,
@@ -235,9 +265,10 @@ impl Renderer {
                 label: Some("cloud shader"),
                 source: wgpu::ShaderSource::Wgsl(include_str!("cloud.wgsl").into()),
             });
-        for kind in 0..3 {
+        for kind in 0..4 {
             let is_point = kind == 0;
             let is_shell = kind == 2;
+            let is_hud = kind == 3;
             let rgb_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
             let rgba_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4];
             let pipeline = self
@@ -245,22 +276,26 @@ impl Renderer {
                 .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some(if is_point {
                         "point splats"
+                    } else if is_shell {
+                        "grab feedback"
+                    } else if is_hud {
+                        "hud overlay"
                     } else {
                         "detection annotations"
                     }),
                     layout: Some(&pipeline_layout),
                     vertex: wgpu::VertexState {
                         module: &shader,
-                        entry_point: Some(if is_point { "point" } else if is_shell { "shell" } else { "line" }),
+                        entry_point: Some(if is_point { "point" } else if is_shell || is_hud { "shell" } else { "line" }),
                         compilation_options: Default::default(),
                         buffers: &[Some(wgpu::VertexBufferLayout {
-                            array_stride: if is_shell { 28 } else { 24 },
+                            array_stride: if is_shell || is_hud { 28 } else { 24 },
                             step_mode: if is_point {
                                 wgpu::VertexStepMode::Instance
                             } else {
                                 wgpu::VertexStepMode::Vertex
                             },
-                            attributes: if is_shell {
+                            attributes: if is_shell || is_hud {
                                 &rgba_attributes
                             } else {
                                 &rgb_attributes
@@ -269,17 +304,17 @@ impl Renderer {
                     },
                     fragment: Some(wgpu::FragmentState {
                         module: &shader,
-                        entry_point: Some(if is_shell { "shell_color" } else { "color" }),
+                        entry_point: Some(if is_shell || is_hud { "shell_color" } else { "color" }),
                         compilation_options: Default::default(),
                         targets: &[Some(wgpu::ColorTargetState {
                             format: color,
-                            blend: if is_shell { Some(wgpu::BlendState::ALPHA_BLENDING) } else { None },
+                            blend: if is_shell || is_hud { Some(wgpu::BlendState::ALPHA_BLENDING) } else { None },
                             write_mask: wgpu::ColorWrites::ALL,
                         })],
                     }),
                     primitive: wgpu::PrimitiveState {
                         cull_mode: if is_shell { Some(wgpu::Face::Back) } else { None },
-                        topology: if is_point || is_shell {
+                        topology: if is_point || is_shell || is_hud {
                             wgpu::PrimitiveTopology::TriangleList
                         } else {
                             wgpu::PrimitiveTopology::LineList
@@ -301,7 +336,9 @@ impl Renderer {
                     multiview_mask: None,
                     cache: None,
                 });
-            if is_shell {
+            if is_hud {
+                self.hud_pipeline = Some(pipeline);
+            } else if is_shell {
                 self.shell_pipeline = Some(pipeline);
             } else if is_point {
                 self.point_pipeline = Some(pipeline);
@@ -367,6 +404,19 @@ impl Renderer {
         self.feedback_count = (vertices.len() / 7) as u32;
         if !vertices.is_empty() {
             self.queue.write_buffer(&self.feedback, 0, bytemuck::cast_slice(vertices));
+        }
+        Ok(())
+    }
+
+    /// RGBA triangle vertices in view space (eye space), projected directly with projection matrix.
+    pub fn set_hud(&mut self, vertices: &[f32]) -> Result<(), JsValue> {
+        if vertices.len() % 21 != 0 || vertices.len() * 4 > 65536
+            || !vertices.iter().all(|v| v.is_finite()) {
+            return Err(JsValue::from_str("Invalid HUD vertices"));
+        }
+        self.hud_count = (vertices.len() / 7) as u32;
+        if !vertices.is_empty() {
+            self.queue.write_buffer(&self.hud, 0, bytemuck::cast_slice(vertices));
         }
         Ok(())
     }
@@ -470,6 +520,10 @@ impl Renderer {
         uniforms[..16].copy_from_slice(&world_mvp.to_cols_array());
         uniforms[16..].copy_from_slice(&Mat4::IDENTITY.to_cols_array());
         self.queue.write_buffer(&self.feedback_uniform, 0, bytemuck::cast_slice(&uniforms));
+        let hud_mvp = Mat4::from_cols_slice(projection);
+        uniforms[..16].copy_from_slice(&hud_mvp.to_cols_array());
+        uniforms[16..].copy_from_slice(&Mat4::IDENTITY.to_cols_array());
+        self.queue.write_buffer(&self.hud_uniform, 0, bytemuck::cast_slice(&uniforms));
         let color_view = self.attachment(color, layer)?;
         let depth_view = self.attachment(depth, layer)?;
         let mut encoder = self.device.create_command_encoder(&Default::default());
@@ -521,6 +575,12 @@ impl Renderer {
                 pass.set_vertex_buffer(0, self.feedback.slice(..));
                 pass.set_pipeline(self.shell_pipeline.as_ref().unwrap());
                 pass.draw(0..self.feedback_count, 0..1);
+            }
+            if self.hud_count > 0 {
+                pass.set_bind_group(0, &self.hud_bind, &[]);
+                pass.set_vertex_buffer(0, self.hud.slice(..));
+                pass.set_pipeline(self.hud_pipeline.as_ref().unwrap());
+                pass.draw(0..self.hud_count, 0..1);
             }
         }
         // Submit each view before updating the shared uniform for the next eye.

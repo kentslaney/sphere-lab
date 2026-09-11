@@ -11,6 +11,7 @@ function updateScaleKey() {
   const key=$('scale-key');
   if(!key) return;
   const isEnabled=$('scale-legend')?.checked ?? true;
+  viewer?.setHudVisible(isEnabled);
   if(!isEnabled) { key.hidden=true; return; }
   key.hidden=false;
   const cam=viewer?.getCamera()||{yaw:0,pitch:0,distance:2,scale:1};

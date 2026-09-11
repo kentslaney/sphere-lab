@@ -1,5 +1,6 @@
 import { grabFeedbackVertices } from './xr-feedback.js';
 import { CloudGrab, attachCloudGrab } from './xr-grab.js';
+import { buildVrHudVertices } from './vr-hud.js';
 
 export async function createViewer(canvas, button, status) {
 const identity = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
@@ -19,9 +20,24 @@ try {
   const canvasFormat = navigator.gpu.getPreferredCanvasFormat();
   const grab = new CloudGrab();
   let yaw=0,pitch=0,distance=2,drag=null;
+  let isHudVisible = true;
+  let lastVrHudScale = -1;
+  const updateVrHud = () => {
+    if (!session) return;
+    const vertices = buildVrHudVertices({
+      scale: grab.scale,
+      avgDepth: Math.hypot(grab.position[0], grab.position[1], grab.position[2] + distance),
+      isVisible: isHudVisible,
+    });
+    renderer.set_hud(vertices);
+  };
   const applyGrab = () => {
     renderer.set_grab(grab.position[0], grab.position[1], grab.position[2] + distance, grab.scale);
     renderer.set_grab_rotation(new Float32Array(grab.rotation));
+    if (session && Math.abs(grab.scale - lastVrHudScale) > 0.005) {
+      lastVrHudScale = grab.scale;
+      updateVrHud();
+    }
   };
   const onPoseCallbacks = [];
   const notifyPose = () => {
@@ -93,6 +109,7 @@ try {
           session = null;
           button.textContent = 'Enter VR';
           button.disabled = stopped;
+          renderer.set_hud(new Float32Array());
           if (!stopped) {
             status.textContent = 'Ready to enter VR again.';
             previewFrame = requestAnimationFrame(preview);
@@ -109,6 +126,7 @@ try {
           button.textContent = 'Exit VR';
           status.textContent = 'VR: pinch and move to grab · Pinch with both hands and spread to scale.';
           grab.release();
+          updateVrHud();
           const updateGrab = attachCloudGrab(active, space, grab, applyGrab, markers => {
             const feedback = grabFeedbackVertices(markers);
             renderer.set_grab_feedback(feedback);
@@ -159,8 +177,10 @@ try {
   return {
     setCloud:points=>renderer.set_cloud(points),
     setLines:lines=>renderer.set_lines(lines),
-    reset:()=>{yaw=0;pitch=0;distance=2;grab.reset();pose();},
-    clear:()=>{renderer.set_cloud(new Float32Array());renderer.set_lines(new Float32Array());},
+    setHudVisible:visible=>{isHudVisible=visible;updateVrHud();},
+    setHud:vertices=>renderer.set_hud(vertices),
+    reset:()=>{yaw=0;pitch=0;distance=2;grab.reset();pose();updateVrHud();},
+    clear:()=>{renderer.set_cloud(new Float32Array());renderer.set_lines(new Float32Array());renderer.set_hud(new Float32Array());},
     getCamera:()=>({yaw,pitch,distance,scale:grab.scale}),
     onPose:cb=>{onPoseCallbacks.push(cb);cb({yaw,pitch,distance,scale:grab.scale});},
   };
