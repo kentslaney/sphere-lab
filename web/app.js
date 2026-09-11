@@ -1,7 +1,7 @@
 import {createViewer} from './viewer.js';
-import {WIDTH,HEIGHT,pointCloud,sphereLines,selectDetections,depthRange} from './geometry.js';
+import {WIDTH,HEIGHT,pointCloud,sphereLines,selectDetections,depthRange,cloudBounds,scaleBarLines} from './geometry.js';
 const $=id=>document.getElementById(id);
-let viewer=null, worker=null, job=0, rgba=null, depth=null, candidates=null, range=null;
+let viewer=null, worker=null, job=0, rgba=null, depth=null, candidates=null, range=null, bounds=null;
 let selected=[], sourceName='', depthMs=0, detectorMs=0, busy=false;
 const photo=$('photo').getContext('2d'),depthCanvas=$('depth').getContext('2d');
 function status(message,error=false){$('status').textContent=message;$('status').classList.toggle('error',error);}
@@ -13,12 +13,21 @@ function rebuild(updateCloud=true) {
   if(updateCloud) {
     const cloud=pointCloud(depth,rgba,spread);
     range=cloud.range;
+    bounds=cloudBounds(cloud.vertices);
     if(viewer)viewer.setCloud(cloud.vertices);
     $('point-count').textContent=`${(cloud.vertices.length/6).toLocaleString()} POINTS`;
   }
-  if(viewer)viewer.setLines(new Float32Array());
+  const allLines=[];
+  if(bounds&&$('scale-legend')?.checked) {
+    const bar=scaleBarLines(bounds);
+    for(let i=0;i<bar.length;i++) allLines.push(bar[i]);
+  }
   selected=candidates?selectDetections(candidates,threshold):[];
-  if(viewer&&$('outlines').checked) viewer.setLines(sphereLines(selected,depth,range,spread));
+  if(viewer&&$('outlines').checked&&selected.length) {
+    const outlines=sphereLines(selected,depth,range,spread);
+    for(let i=0;i<outlines.length;i++) allLines.push(outlines[i]);
+  }
+  if(viewer)viewer.setLines(new Float32Array(allLines));
   photo.putImageData(new ImageData(rgba,WIDTH,HEIGHT),0,0);
   photo.strokeStyle='#ffcc66';photo.lineWidth=2;
   photo.font='bold 15px system-ui';
@@ -75,7 +84,7 @@ function startWorker(){
 async function analyze(blob,name){
   if(busy) return;
   controls(true);const currentJob=++job;
-  sourceName=name;rgba=null;depth=null;candidates=null;selected=[];
+  sourceName=name;rgba=null;depth=null;candidates=null;selected=[];bounds=null;
   $('download').disabled=true;$('timing').textContent='';$('result-heading').textContent='Analyzing photo';
   $('results').replaceChildren();$('point-count').textContent='WAITING FOR DEPTH';
   for(const id of ['depth','cloud','detect'])stage(id,'');
@@ -106,6 +115,7 @@ $('cancel').addEventListener('click',()=>{++job;worker?.terminate();worker=null;
 for(const id of ['spread','threshold'])$(''+id).addEventListener('input',()=>{
   $(`${id}-value`).value=Number($(id).value).toFixed(2);rebuild(id==='spread');
 });
+$('scale-legend').addEventListener('change',()=>rebuild(false));
 $('outlines').addEventListener('change',()=>rebuild(false));
 $('reset').addEventListener('click',()=>viewer?.reset());
 $('download').addEventListener('click',()=>{

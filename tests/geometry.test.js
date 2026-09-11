@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {sphereLines,normalizeImage,resizeDepth,selectDetections,pointCloud,pointAt,displayZ,WIDTH,HEIGHT} from '../web/geometry.js';
+import {sphereLines,normalizeImage,resizeDepth,selectDetections,pointCloud,pointAt,displayZ,WIDTH,HEIGHT,cloudBounds,scaleBarLines} from '../web/geometry.js';
 test('RGB normalization is NCHW and uses ImageNet values',()=>{
   const out=normalizeImage(new Uint8ClampedArray([255,0,128,255,0,255,0,255]),2,1);
   assert.equal(out.length,6);
@@ -44,4 +44,41 @@ test('fitted outlines use exported depth geometry rather than center-pixel depth
   for(let i=0;i<3;i++) assert.ok(Math.abs(lines[apexStart+i]-apex[i])<1e-6);
   assert.notDeepEqual(lines,sphereLines([{...detection,depthScale:40}],null,range));
   assert.equal(sphereLines([{...detection,depthScale:NaN}],null,range).length,0);
+});
+
+test('cloudBounds correctly computes bounding box and handles fallback',()=>{
+  const sample = new Float32Array([
+    -0.4, -0.3, 0.1, 1, 1, 1,
+     0.6,  0.5, 0.9, 1, 1, 1,
+    -0.1,  0.2, 0.4, 1, 1, 1,
+  ]);
+  const b = cloudBounds(sample);
+  assert.ok(Math.abs(b.minX - (-0.4)) < 1e-6);
+  assert.ok(Math.abs(b.maxX - 0.6) < 1e-6);
+  assert.ok(Math.abs(b.minY - (-0.3)) < 1e-6);
+  assert.ok(Math.abs(b.maxY - 0.5) < 1e-6);
+  assert.ok(Math.abs(b.minZ - 0.1) < 1e-6);
+  assert.ok(Math.abs(b.maxZ - 0.9) < 1e-6);
+
+  const fallback = cloudBounds(null);
+  assert.equal(fallback.minX, -0.5);
+  assert.equal(fallback.maxX, 0.5);
+});
+
+test('scaleBarLines produces map-style single axis scale bar with calibrated length and ticks',()=>{
+  const bounds = { minX: -0.5, maxX: 0.5, minY: -0.4, maxY: 0.6, minZ: -0.2, maxZ: 0.8 };
+  const lines = scaleBarLines(bounds, 0.5, 5);
+  assert.ok(lines.length > 0);
+  assert.equal(lines.length % 12, 0);
+  assert.ok(lines.every(Number.isFinite));
+
+  // First line is the baseline
+  const startX = lines[0], baseY = lines[1], baseZ = lines[2];
+  const endX = lines[6];
+  assert.ok(Math.abs((endX - startX) - 0.5) < 1e-6);
+  assert.ok(Math.abs(baseY - (-0.4 - 0.08)) < 1e-6);
+  assert.ok(Math.abs(baseZ - (0.8 + 0.02)) < 1e-6);
+
+  // Baseline is centered horizontally on the cloud bounds
+  assert.ok(Math.abs((startX + endX) / 2 - (bounds.minX + bounds.maxX) / 2) < 1e-6);
 });

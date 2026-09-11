@@ -98,3 +98,102 @@ export function sphereLines(detections,depth,range,spread=1) {
   }
   return new Float32Array(out);
 }
+
+export function cloudBounds(vertices) {
+  if (!vertices || vertices.length < 6) {
+    return { minX: -0.5, maxX: 0.5, minY: -0.5, maxY: 0.5, minZ: -0.5, maxZ: 0.5 };
+  }
+  let minX = Infinity, maxX = -Infinity;
+  let minY = Infinity, maxY = -Infinity;
+  let minZ = Infinity, maxZ = -Infinity;
+  for (let i = 0; i < vertices.length; i += 6) {
+    const x = vertices[i], y = vertices[i+1], z = vertices[i+2];
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z;
+    if (z > maxZ) maxZ = z;
+  }
+  if (!Number.isFinite(minX)) {
+    return { minX: -0.5, maxX: 0.5, minY: -0.5, maxY: 0.5, minZ: -0.5, maxZ: 0.5 };
+  }
+  return { minX, maxX, minY, maxY, minZ, maxZ };
+}
+
+const STROKE_GLYPHS = {
+  '0': [[0,0, 1,0], [1,0, 1,1], [1,1, 0,1], [0,1, 0,0]],
+  '1': [[0.5,0, 0.5,1]],
+  '2': [[0,1, 1,1], [1,1, 1,0.5], [1,0.5, 0,0.5], [0,0.5, 0,0], [0,0, 1,0]],
+  '3': [[0,1, 1,1], [1,1, 1,0], [1,0, 0,0], [0,0.5, 1,0.5]],
+  '4': [[0,1, 0,0.5], [0,0.5, 1,0.5], [1,1, 1,0]],
+  '5': [[1,1, 0,1], [0,1, 0,0.5], [0,0.5, 1,0.5], [1,0.5, 1,0], [1,0, 0,0]],
+  '6': [[1,1, 0,1], [0,1, 0,0], [0,0, 1,0], [1,0, 1,0.5], [1,0.5, 0,0.5]],
+  '7': [[0,1, 1,1], [1,1, 0.3,0]],
+  '8': [[0,0, 1,0], [1,0, 1,1], [1,1, 0,1], [0,1, 0,0], [0,0.5, 1,0.5]],
+  '9': [[1,0.5, 0,0.5], [0,0.5, 0,1], [0,1, 1,1], [1,1, 1,0], [1,0, 0,0]],
+  '.': [[0.3,0, 0.7,0], [0.5,-0.05, 0.5,0.05]],
+  'm': [[0,0, 0,0.7], [0,0.7, 0.5,0.7], [0.5,0.7, 0.5,0], [0.5,0.7, 1,0.7], [1,0.7, 1,0]],
+  'c': [[1,0.7, 0,0.7], [0,0.7, 0,0], [0,0, 1,0]],
+  ' ': []
+};
+
+export function scaleBarLines(bounds, barLength = 0.5, divisions = 5) {
+  const b = bounds || { minX: -0.5, maxX: 0.5, minY: -0.5, maxY: 0.5, minZ: -0.5, maxZ: 0.5 };
+  const len = Number.isFinite(barLength) && barLength > 0 ? barLength : 0.5;
+  const startX = (b.minX + b.maxX - len) / 2;
+  const baseY = b.minY - 0.08;
+  const baseZ = (Number.isFinite(b.maxZ) ? b.maxZ : 0) + 0.02;
+  const color = [0.52, 0.87, 0.74]; // Teal (#84ddbd)
+  const lines = [];
+
+  const pushLine = (x1, y1, z1, x2, y2, z2) => {
+    lines.push(x1, y1, z1, ...color, x2, y2, z2, ...color);
+  };
+
+  // Main horizontal baseline
+  pushLine(startX, baseY, baseZ, startX + len, baseY, baseZ);
+
+  // Vertical tick marks (map-style intervals)
+  const step = len / divisions;
+  for (let i = 0; i <= divisions; i++) {
+    const x = startX + i * step;
+    const isEnd = (i === 0 || i === divisions);
+    const tickH = isEnd ? 0.03 : 0.018;
+    pushLine(x, baseY, baseZ, x, baseY + tickH, baseZ);
+  }
+
+  // Draw vector-stroke text labels
+  const drawText = (str, x, y, charH = 0.022, charW = 0.014, spacing = 0.004) => {
+    let curX = x;
+    for (const ch of str) {
+      const glyph = STROKE_GLYPHS[ch];
+      if (glyph) {
+        for (const [gx1, gy1, gx2, gy2] of glyph) {
+          pushLine(
+            curX + gx1 * charW, y + gy1 * charH, baseZ,
+            curX + gx2 * charW, y + gy2 * charH, baseZ
+          );
+        }
+      }
+      curX += charW + spacing;
+    }
+  };
+
+  const measureText = (str, charW = 0.014, spacing = 0.004) => {
+    return str.length * charW + Math.max(0, str.length - 1) * spacing;
+  };
+
+  const labelH = 0.022, labelW = 0.014, spacing = 0.004;
+  // "0" above start tick
+  const zeroW = measureText('0', labelW, spacing);
+  drawText('0', startX - zeroW / 2, baseY + 0.035, labelH, labelW, spacing);
+
+  // Calibrated length label (e.g. "0.5 m") above end tick
+  const endLabel = `${len} m`;
+  const endW = measureText(endLabel, labelW, spacing);
+  drawText(endLabel, startX + len - endW / 2, baseY + 0.035, labelH, labelW, spacing);
+
+  return new Float32Array(lines);
+}
+
