@@ -29,10 +29,10 @@ function rebuild(updateCloud=true) {
   $('results').replaceChildren();
   if(candidates) {
     $('result-heading').textContent=`${selected.length} sphere candidate${selected.length===1?'':'s'}`;
-    if(!selected.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=4;td.textContent='No candidates meet the current score threshold.';tr.append(td);$('results').append(tr);}
+    if(!selected.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=6;td.textContent='No candidates meet the current score threshold.';tr.append(td);$('results').append(tr);}
     for(const d of selected){
       const tr=document.createElement('tr');
-      for(const value of [`#${d.id+1}`,d.score.toFixed(4),`${((d.x0+d.x1)/2).toFixed(1)}, ${((d.y0+d.y1)/2).toFixed(1)}`,(((d.x1-d.x0)+(d.y1-d.y0))/4).toFixed(1)]){
+      for(const value of [`#${d.id+1}`,d.score.toFixed(4),`${((d.x0+d.x1)/2).toFixed(1)}, ${((d.y0+d.y1)/2).toFixed(1)}`,(((d.x1-d.x0)+(d.y1-d.y0))/4).toFixed(1),...[d.centerDepth,d.depthScale].map(v=>Number.isFinite(v)?v.toPrecision(5):'—')]){
         const td=document.createElement('td');td.textContent=value;tr.append(td);
       }
       $('results').append(tr);
@@ -115,7 +115,7 @@ $('download').addEventListener('click',()=>{
     scoreThreshold:Number($('threshold').value),iouThreshold:0.75,
     detections:selected,rawCandidates:Array.from(candidates),
     timingsMs:{depth:depthMs,detector:detectorMs},
-    note:'Scores are not calibrated probabilities. 3D annotations are not metric sphere fits.'};
+    note:'Scores are not calibrated probabilities. Wireframes show base fitted depth profiles without RMSE skew correction; display coordinates are not metric.'};
   const url=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'}));
   const link=document.createElement('a');link.href=url;link.download='sphere-results.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 });

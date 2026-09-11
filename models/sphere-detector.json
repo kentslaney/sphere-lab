@@ -3,7 +3,7 @@
   "width": 518,
   "candidates": 8,
   "input": "relative inverse depth, float32 [height,width]",
-  "output": "[8,5]: confidence, y_min, x_min, y_max, x_max",
+  "output": "[8,7]: confidence, y_min, x_min, y_max, x_max, center_depth, depth_scale",
   "entry": "main",
   "runtime": "IREE VMVX",
   "sourceRevision": "0e28468d657c02ffd18b9bc9c51dfcf4a90fe97e"

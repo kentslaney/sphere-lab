@@ -35,8 +35,8 @@
         <label class="toggle"><input id="outlines" type="checkbox" checked> Show detections</label>
       </div>
       <section class="panel results"><div class="results-heading"><div><div class="eyebrow">04 / RESULTS</div><h2 id="result-heading">Waiting for a photo</h2></div><button id="download" disabled>Export results</button></div>
-        <p class="small muted">Scores are detector confidence values, not calibrated probabilities. Overlapping candidates are suppressed at IoU 0.75. Gold wireframes are 3D annotations of image detections, not recovered sphere geometry.</p>
-        <div class="table-scroll"><table><thead><tr><th>Candidate</th><th>Score</th><th>Center (px)</th><th>Radius (px)</th></tr></thead><tbody id="results"><tr><td colspan="4">Results appear after the detector finishes.</td></tr></tbody></table></div>
+        <p class="small muted">Scores are detector confidence values, not calibrated probabilities. Overlapping candidates are suppressed at IoU 0.75. Gold wireframes show fitted depth profiles before skew correction, mapped into display space; they are not metric measurements. Center depth uses reciprocal input units; depth scale converts those units to pixels for the fit.</p>
+        <div class="table-scroll"><table><thead><tr><th>Candidate</th><th>Score</th><th>Center (px)</th><th>Radius (px)</th><th>Center depth (relative)</th><th>Depth scale (px / depth unit)</th></tr></thead><tbody id="results"><tr><td colspan="6">Results appear after the detector finishes.</td></tr></tbody></table></div>
       </section>
       <p class="footnote">Relative depth only · Assumed 60° horizontal field of view · Display scale is adjustable and does not represent measured distances.</p>
     </section>

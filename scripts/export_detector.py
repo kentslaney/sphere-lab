@@ -13,9 +13,12 @@ import iree.compiler as compiler
 HEIGHT, WIDTH = 392, 518
 @jax.jit
 def detect(relative_inverse_depth):
-    confidence, bounds = Raster(None, relative_inverse_depth,
-        resolution=(HEIGHT, WIDTH)).opt().predict()
-    return jnp.concatenate((confidence[:, None], bounds), axis=1)
+    rays = Raster(None, relative_inverse_depth,
+        resolution=(HEIGHT, WIDTH)).opt()
+    surface = rays.surface
+    # Extend the browser graph without changing the upstream detector API.
+    return jnp.concatenate((surface.confidence[:, None], surface.bounds,
+        surface.center_2nd[:, None], rays.w[:, None]), axis=1)[surface.order]
 
 def main():
     output = ROOT / 'models'
@@ -31,7 +34,7 @@ def main():
     (output / 'sphere-detector.json').write_text(json.dumps({
         'height': HEIGHT, 'width': WIDTH, 'candidates': 8,
         'input': 'relative inverse depth, float32 [height,width]',
-        'output': '[8,5]: confidence, y_min, x_min, y_max, x_max',
+        'output': '[8,7]: confidence, y_min, x_min, y_max, x_max, center_depth, depth_scale',
         'entry': 'main', 'runtime': 'IREE VMVX',
         'sourceRevision': subprocess.check_output(['git','-C',str(ROOT/'sphere-detector'),'rev-parse','HEAD'],text=True).strip(),
     }, indent=2))

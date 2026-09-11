@@ -151,8 +151,13 @@ Depth Anything V2 Small estimates **relative inverse depth**, not meters. The
 viewer maps its 2nd–98th percentile range to bounded display distances and uses
 an assumed 60° horizontal field of view. Depth spread changes only visualization;
 it does not change the tensor passed to the detector. Gold sphere outlines are
-annotations derived from 2D bounds and sampled display depth, **not fitted 3D
-spheres or physical measurements**. Scores are not calibrated probabilities.
+base fitted depth profiles using the exported center depth and depth scale,
+including the detector’s radial sampling offset but excluding its RMSE skew
+correction. The nonlinear display mapping can distort these profiles; they are
+**not physical measurements**. The browser graph exports `[8,7]` rows containing
+confidence, four bounds, center depth, and depth scale without modifying the
+upstream detector. Center depth is in reciprocal input units, and depth scale
+converts those depth units to pixels for the fit. Scores are not calibrated probabilities.
 
 The graph's reductions and numerically sensitive fitting can produce different
 candidate scores/order on JAX, native IREE, and Wasm IREE. The synthetic-sphere

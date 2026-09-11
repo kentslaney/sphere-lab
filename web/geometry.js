@@ -55,12 +55,12 @@ export function pointCloud(depth,rgba,spread=1,step=1) {
 }
 export function selectDetections(raw, threshold=0.1, iouThreshold=0.75) {
   const candidates=[];
-  for(let i=0;i<raw.length;i+=5) {
-    const [score,y0,x0,y1,x1]=raw.slice(i,i+5);
+  for(let i=0;i<raw.length;i+=7) {
+    const [score,y0,x0,y1,x1,centerDepth,depthScale]=raw.slice(i,i+7);
     if (![score,y0,x0,y1,x1].every(Number.isFinite)||score<threshold||y1<=y0||x1<=x0) continue;
     // Invalid or wholly outside candidates are not useful detections.
     if(x1<0||y1<0||x0>=WIDTH||y0>=HEIGHT) continue;
-    candidates.push({id:i/5,score,x0,y0,x1,y1});
+    candidates.push({id:i/7,score,x0,y0,x1,y1,centerDepth,depthScale});
   }
   candidates.sort((a,b)=>b.score-a.score);
   const kept=[];
@@ -77,16 +77,23 @@ export function sphereLines(detections,depth,range,spread=1) {
   const out=[];
   for(const d of detections) {
     const x=(d.x0+d.x1)/2,y=(d.y0+d.y1)/2;
-    const ix=Math.max(0,Math.min(WIDTH-1,Math.round(x))),iy=Math.max(0,Math.min(HEIGHT-1,Math.round(y)));
-    const sample=depth[iy*WIDTH+ix];
-    if(!Number.isFinite(sample)||sample<=0) continue;
-    const center=pointAt(x,y,sample,range,spread);
-    const z=displayZ(sample,range,spread), focal=WIDTH/(2*Math.tan(Math.PI/6));
-    const radius=((d.x1-d.x0)+(d.y1-d.y0))/4*z/focal;
-    // Display annotation only: center-depth placement is not a fitted 3D sphere.
-    for(let axis=0;axis<3;axis++) for(let i=0;i<64;i++) for(const a of [i/64*Math.PI*2,(i+1)/64*Math.PI*2]) {
-      const p=[...center];p[(axis+1)%3]+=Math.cos(a)*radius;p[(axis+2)%3]+=Math.sin(a)*radius;
-      out.push(...p,1,0.7,0.2);
+    const {centerDepth,depthScale}=d;
+    if(!Number.isFinite(centerDepth)||centerDepth<=0||!Number.isFinite(depthScale)||depthScale<=0) continue;
+    const radius=((d.x1-d.x0)+(d.y1-d.y0))/4;
+    // Match the radial sampling offset in Surface.surface. The RMSE also
+    // applies a skew correction; these outlines show the base fitted profile.
+    const offset=-(Math.sqrt(2)+Math.log(1+Math.sqrt(2)))/4;
+    const fittedRadius=radius-offset;
+    const point=(axis,a)=>{
+      const p=[0,0,0];p[(axis+1)%3]=Math.cos(a);p[(axis+2)%3]=Math.sin(a);
+      const rho=radius*Math.hypot(p[0],p[1]);
+      const dz=Math.sign(p[2])*Math.sqrt(Math.max(0,fittedRadius**2-(rho-offset)**2))/depthScale;
+      const z=centerDepth+dz;
+      return z>0 ? pointAt(x+radius*p[0],y+radius*p[1],1/z,range,spread) : null;
+    };
+    for(let axis=0;axis<3;axis++) for(let i=0;i<64;i++) {
+      const a=point(axis,i/64*Math.PI*2),b=point(axis,(i+1)/64*Math.PI*2);
+      if(a&&b) out.push(...a,1,0.7,0.2,...b,1,0.7,0.2);
     }
   }
   return new Float32Array(out);

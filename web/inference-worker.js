@@ -77,12 +77,12 @@ onmessage=async ({data:{id,type,rgba,depth:provided}})=>{
     await loadDetector(id);
     progress(id,'detecting','Running sphere-detector graph on Wasm CPU…');
     const start=performance.now();
-    const input=runtime._malloc(depth.byteLength),output=runtime._malloc(40*4);
+    const input=runtime._malloc(depth.byteLength),output=runtime._malloc(56*4);
     if(!input||!output){if(input)runtime._free(input);if(output)runtime._free(output);throw new Error('Detector memory allocation failed.');}
     try {
       runtime.HEAPF32.set(depth,input/4);
       if(runtime._sphere_run(input,depth.length,output)) throw new Error(runtime.UTF8ToString(runtime._sphere_error()));
-      const candidates=runtime.HEAPF32.slice(output/4,output/4+40);
+      const candidates=runtime.HEAPF32.slice(output/4,output/4+56);
       postMessage({id,type:'result',candidates,elapsed:performance.now()-start},[candidates.buffer]);
     } finally {runtime._free(input);runtime._free(output);}
   } catch(error) {

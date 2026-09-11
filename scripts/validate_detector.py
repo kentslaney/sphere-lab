@@ -23,6 +23,9 @@ for name,values in [('JAX',expected),('IREE',actual)]:
     best=values[0]; center=(best[1:3]+best[3:5])/2;radius=np.mean(best[3:5]-best[1:3])/2
     np.testing.assert_allclose(center,[HEIGHT/2,WIDTH/2],atol=1)
     np.testing.assert_allclose(radius,65,atol=1)
+    # Raster sampling and the fitted profile offset introduce a small bias.
+    np.testing.assert_allclose(best[5],3,atol=0.05)
+    np.testing.assert_allclose(best[6],80,atol=3)
     assert best[0]>0.1
     print(name,'center',center,'radius',radius,'score',best[0])
 report={'jax':expected.tolist(),'iree':actual.tolist(),

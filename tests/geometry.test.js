@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {normalizeImage,resizeDepth,selectDetections,pointCloud,pointAt,displayZ,WIDTH,HEIGHT} from '../web/geometry.js';
+import {sphereLines,normalizeImage,resizeDepth,selectDetections,pointCloud,pointAt,displayZ,WIDTH,HEIGHT} from '../web/geometry.js';
 test('RGB normalization is NCHW and uses ImageNet values',()=>{
   const out=normalizeImage(new Uint8ClampedArray([255,0,128,255,0,255,0,255]),2,1);
   assert.equal(out.length,6);
@@ -13,7 +13,7 @@ test('bilinear depth resize preserves constant maps and averages center',()=>{
   assert.deepEqual([...resizeDepth(new Float32Array([4]),1,1,2,2)],[4,4,4,4]);
 });
 test('NMS removes overlapping duplicates, invalid candidates, and low scores',()=>{
-  const raw=new Float32Array([.9,10,20,30,40,.8,11,21,31,41,.7,80,90,100,110,.01,1,1,2,2,NaN,1,1,2,2]);
+  const raw=new Float32Array([.9,10,20,30,40,3,80,.8,11,21,31,41,3,80,.7,80,90,100,110,3,80,.01,1,1,2,2,3,80,NaN,1,1,2,2,3,80]);
   const out=selectDetections(raw,.1,.5);assert.deepEqual(out.map(d=>d.id),[0,2]);
 });
 test('larger inverse depth places a point nearer and projection centers correctly',()=>{
@@ -25,4 +25,23 @@ test('point cloud skips invalid values and retains normalized colors',()=>{
   d[0]=NaN;const {vertices}=pointCloud(d,rgba,1,2);
   assert.equal(vertices.length,(Math.ceil(WIDTH/2)*Math.ceil(HEIGHT/2)-1)*6);
   assert.ok(vertices.every(Number.isFinite));assert.equal(vertices[3],1);
+});
+
+test('fitted outlines use exported depth geometry rather than center-pixel depth',()=>{
+  const detection={x0:194,y0:131,x1:324,y1:261,centerDepth:3,depthScale:80};
+  const range=[0.2,0.5];
+  const lines=sphereLines([detection],new Float32Array(WIDTH*HEIGHT).fill(NaN),range);
+  assert.equal(lines.length,3*64*2*6);
+  assert.ok(lines.every(Number.isFinite));
+  const equator=pointAt(324,196,1/3,range);
+  // Third great circle starts on the image's positive x axis.
+  const start=2*64*2*6;
+  for(let i=0;i<3;i++) assert.ok(Math.abs(lines[start+i]-equator[i])<1e-6);
+  const offset=-(Math.sqrt(2)+Math.log(1+Math.sqrt(2)))/4;
+  const apexDepth=3-Math.sqrt((65-offset)**2-offset**2)/80;
+  const apex=pointAt(259,196,1/apexDepth,range);
+  const apexStart=48*2*6; // negative depth pole of the first meridian
+  for(let i=0;i<3;i++) assert.ok(Math.abs(lines[apexStart+i]-apex[i])<1e-6);
+  assert.notDeepEqual(lines,sphereLines([{...detection,depthScale:40}],null,range));
+  assert.equal(sphereLines([{...detection,depthScale:NaN}],null,range).length,0);
 });

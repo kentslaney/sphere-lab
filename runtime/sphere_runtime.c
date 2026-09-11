@@ -88,11 +88,11 @@ int sphere_run(const float* input, unsigned int count, float* output) {
   TRY(iree_vm_list_create(iree_vm_make_undefined_type_def(), 1, allocator, &outputs));
   TRY(iree_vm_invoke(context, function, IREE_VM_INVOCATION_FLAG_NONE, NULL, inputs, outputs, allocator));
   iree_hal_buffer_view_t* out = iree_vm_list_get_buffer_view_assign(outputs, 0);
-  if (!out || iree_hal_buffer_view_byte_length(out) != 40 * sizeof(float)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "Expected detector output [8,5]"); goto cleanup;
+  if (!out || iree_hal_buffer_view_byte_length(out) != 56 * sizeof(float)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "Expected detector output [8,7]"); goto cleanup;
   }
   TRY(iree_hal_device_transfer_d2h(device, iree_hal_buffer_view_buffer(out), 0, output,
-      40 * sizeof(float), IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+      56 * sizeof(float), IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
 cleanup:
   iree_vm_ref_release(&ref);
   iree_hal_buffer_view_release(tensor);
