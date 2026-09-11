@@ -1,6 +1,21 @@
 import { grabFeedbackVertices, buildDebugSphereVertices } from './xr-feedback.js';
 import { CloudGrab, attachCloudGrab } from './xr-grab.js';
 
+async function loadWasmBytes(url) {
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(url, { credentials: 'same-origin' });
+      if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url.pathname}`);
+      return await res.arrayBuffer();
+    } catch (err) {
+      lastError = err;
+      await new Promise(r => setTimeout(r, 200 * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}
+
 export async function createViewer(canvas, button, status) {
   const identity = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
   const report = error => {
@@ -12,10 +27,11 @@ export async function createViewer(canvas, button, status) {
     if (!isSecureContext) throw new Error('Open this page over trusted HTTPS.');
     if (!navigator.gpu) throw new Error('WebGPU is unavailable. Use Safari on visionOS 26.2 or later.');
     const { default: init, Renderer } = await import('./pkg/cube_renderer.js');
-    await init();
+    const wasmBytes = await loadWasmBytes(new URL('./pkg/cube_renderer_bg.wasm', import.meta.url));
+    await init({ module_or_path: wasmBytes });
     const renderer = await Renderer.create();
     const device = renderer.gpu_device();
-    const context = canvas.getContext('webgpu');
+    let context = canvas.getContext('webgpu');
     const canvasFormat = navigator.gpu.getPreferredCanvasFormat();
     const grab = new CloudGrab();
 
@@ -93,6 +109,9 @@ export async function createViewer(canvas, button, status) {
       if (canvas.width === width && canvas.height === height && depth) return;
       canvas.width = width;
       canvas.height = height;
+      if (!context) {
+        context = canvas.getContext('webgpu');
+      }
       if (context) {
         context.configure({ device, format: canvasFormat, alphaMode: 'opaque' });
       }
@@ -101,34 +120,37 @@ export async function createViewer(canvas, button, status) {
     }
 
     function preview(time) {
-      if (session || stopped || !context) return;
+      if (session || stopped) return;
       try {
         resize();
-        renderer.set_format(canvasFormat);
-        const f = 1 / Math.tan(65 * Math.PI / 360);
-        const near = 0.05, far = 100;
-        // WebGPU uses 0..1 clip depth, including projections from WebGPU XR sessions.
-        const projection = new Float32Array([
-          f / (canvas.width / canvas.height), 0, 0, 0,
-          0, f, 0, 0,
-          0, 0, far / (near - far), -1,
-          0, 0, far * near / (near - far), 0,
-        ]);
-        const viewMatrix = getViewMatrix();
-        renderer.draw(
-          context.getCurrentTexture(), depth, 0,
-          new Float32Array([0, 0, canvas.width, canvas.height]),
-          projection, viewMatrix, time / 1000
-        );
+        if (!context) {
+          context = canvas.getContext('webgpu');
+        }
+        if (context) {
+          renderer.set_format(canvasFormat);
+          const f = 1 / Math.tan(65 * Math.PI / 360);
+          const near = 0.05, far = 100;
+          // WebGPU uses 0..1 clip depth, including projections from WebGPU XR sessions.
+          const projection = new Float32Array([
+            f / (canvas.width / canvas.height), 0, 0, 0,
+            0, f, 0, 0,
+            0, 0, far / (near - far), -1,
+            0, 0, far * near / (near - far), 0,
+          ]);
+          const viewMatrix = getViewMatrix();
+          renderer.draw(
+            context.getCurrentTexture(), depth, 0,
+            new Float32Array([0, 0, canvas.width, canvas.height]),
+            projection, viewMatrix, time / 1000
+          );
+        }
         previewFrame = requestAnimationFrame(preview);
       } catch (error) {
         stopped = true;
         report(error);
       }
     }
-    if (context) {
-      previewFrame = requestAnimationFrame(preview);
-    }
+    previewFrame = requestAnimationFrame(preview);
 
     let xrSupported = false;
     try {
@@ -138,13 +160,9 @@ export async function createViewer(canvas, button, status) {
     }
 
     if (!xrSupported) {
-      status.textContent = context
-        ? 'Drag to look · Scroll to move forward · VR requires a compatible headset.'
-        : '2D canvas WebGPU preview unavailable · VR requires a compatible headset.';
+      status.textContent = 'Drag to look · Scroll to move forward · VR requires a compatible headset.';
     } else {
-      status.textContent = context
-        ? 'Drag to look · Scroll to move forward · VR: one pinch to move · Two pinches to scale.'
-        : 'VR: one pinch to move · Two pinches to scale · Tap Enter VR to begin.';
+      status.textContent = 'Drag to look · Scroll to move forward · VR: one pinch to move · Two pinches to scale.';
       button.disabled = false;
       let sessionStarting = false;
       button.addEventListener('click', async () => {
@@ -188,7 +206,7 @@ export async function createViewer(canvas, button, status) {
             button.disabled = stopped;
             renderer.set_hud(new Float32Array());
             renderer.set_grab_feedback(new Float32Array());
-            if (!stopped && context) {
+            if (!stopped) {
               status.textContent = 'Ready to enter VR again.';
               previewFrame = requestAnimationFrame(preview);
             }
@@ -212,6 +230,8 @@ export async function createViewer(canvas, button, status) {
             });
             function frame(time, xrFrame) {
               if (session !== active || stopped) return;
+              // Request next frame at the start so visionOS compositor watchdog never times out
+              active.requestAnimationFrame(frame);
               try {
                 const viewerPose = xrFrame.getViewerPose(space);
                 if (viewerPose) {
@@ -222,21 +242,26 @@ export async function createViewer(canvas, button, status) {
                 if (viewerPose) {
                   for (const view of viewerPose.views) {
                     const image = binding.getViewSubImage(layer, view);
-                    const descriptor = image.getViewDescriptor();
+                    if (!image || !image.colorTexture) continue;
+                    let baseLayer = 0;
+                    if (typeof image.getViewDescriptor === 'function') {
+                      try {
+                        const desc = image.getViewDescriptor();
+                        if (desc && desc.baseArrayLayer !== undefined) baseLayer = desc.baseArrayLayer;
+                      } catch (_) {}
+                    }
+                    const depthTexture = image.depthStencilTexture || depth;
                     const vp = image.viewport;
                     renderer.draw(
-                      image.colorTexture, image.depthStencilTexture,
-                      descriptor.baseArrayLayer ?? 0,
+                      image.colorTexture, depthTexture,
+                      baseLayer,
                       new Float32Array([vp.x, vp.y, vp.width, vp.height]),
                       view.projectionMatrix, view.transform.inverse.matrix, time / 1000
                     );
                   }
                 }
-                active.requestAnimationFrame(frame);
               } catch (error) {
-                stopped = true;
-                report(error);
-                active.end().catch(report);
+                console.error('XR frame render error:', error);
               }
             }
             active.requestAnimationFrame(frame);
