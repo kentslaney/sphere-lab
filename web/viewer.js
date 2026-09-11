@@ -1,3 +1,4 @@
+import { grabFeedbackVertices } from './xr-feedback.js';
 import { CloudGrab, attachCloudGrab } from './xr-grab.js';
 
 export async function createViewer(canvas, button, status) {
@@ -103,11 +104,14 @@ try {
           button.textContent = 'Exit VR';
           status.textContent = 'VR: pinch and move to grab · Pinch with both hands and spread to scale.';
           grab.release();
-          const updateGrab = attachCloudGrab(active, space, grab, applyGrab);
+          const updateGrab = attachCloudGrab(active, space, grab, applyGrab, markers => {
+            const feedback = grabFeedbackVertices(markers);
+            renderer.set_grab_feedback(feedback);
+          });
           function frame(time, xrFrame) {
             if (session !== active || stopped) return;
             try {
-              updateGrab(xrFrame);
+              updateGrab(xrFrame, time);
               const pose = xrFrame.getViewerPose(space);
               if (pose) {
                 for (const view of pose.views) {

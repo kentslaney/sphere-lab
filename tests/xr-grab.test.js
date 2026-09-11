@@ -64,3 +64,40 @@ test('both original local grab points stay under the hands through translation, 
     assert.ok(Math.abs(g.position[i]+v*g.scale-next[k][i]) < 1e-10);
   }));
 });
+
+test('feedback tracks two sources independently and clears stale poses', () => {
+  const listeners = {};
+  const session = { visibilityState: 'visible', addEventListener: (name, fn) => listeners[name] = fn };
+  let markers;
+  const update = attachCloudGrab(session, {}, new CloudGrab(), () => {}, value => markers = value);
+  const a = { gripSpace: { x: -1 } }, b = { gripSpace: { x: 1 } };
+  const frame = { getPose: space => ({ transform: { position: { x: space.x, y: 0, z: -1 } } }) };
+  listeners.selectstart({ inputSource: a }); listeners.selectstart({ inputSource: b });
+  update(frame);
+  assert.equal(markers.length, 2);
+  a.gripSpace.x = -2; update(frame);
+  assert.deepEqual(markers[0].origin, [-1, 0, -1]);
+  assert.deepEqual(markers[0].position, [-2, 0, -1]);
+  listeners.selectend({ inputSource: a }); update(frame);
+  assert.equal(markers[0].slot, 1);
+  update({ getPose: () => null }); assert.deepEqual(markers, []);
+  update(frame); assert.equal(markers.length, 1);
+  listeners.end(); assert.deepEqual(markers, []);
+});
+
+test('unrelated XR input events do not discard held-hand movement', () => {
+  const listeners = {};
+  const session = { visibilityState: 'visible', addEventListener: (name, fn) => listeners[name] = fn };
+  const g = new CloudGrab();
+  const update = attachCloudGrab(session, {}, g, () => {});
+  const source = { gripSpace: {} }, unrelated = {};
+  const frame = x => ({ getPose: () => ({ transform: { position: { x, y: 0, z: -1 } } }) });
+  listeners.selectstart({ inputSource: source }); update(frame(0));
+  for (let i = 1; i <= 10; i++) {
+    listeners.inputsourceschange({ added: [unrelated], removed: [] });
+    listeners.inputsourceschange({ added: [], removed: [unrelated] });
+    listeners.selectend({ inputSource: unrelated });
+    update(frame(i / 10));
+  }
+  assert.deepEqual(g.position, [1, 0, -2]);
+});

@@ -12,3 +12,9 @@ struct Out { @builtin(position) position: vec4f, @location(0) color: vec3f }
     return Out(uniforms.mvp * vec4f(position,1), color);
 }
 @fragment fn color(in: Out) -> @location(0) vec4f { return vec4f(in.color,1); }
+
+struct ShellOut { @builtin(position) position: vec4f, @location(0) color: vec4f }
+@vertex fn shell(@location(0) position: vec3f, @location(1) color: vec4f) -> ShellOut {
+    return ShellOut(uniforms.mvp * vec4f(position,1), color);
+}
+@fragment fn shell_color(in: ShellOut) -> @location(0) vec4f { return in.color; }

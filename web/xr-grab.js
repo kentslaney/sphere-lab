@@ -50,29 +50,46 @@ export class CloudGrab {
   }
 }
 
-export function attachCloudGrab(session, space, grab, apply) {
+export function attachCloudGrab(session, space, grab, apply, feedback = () => {}) {
   const held = new Set();
+  const origins = new Map();
+  const hide = () => { origins.clear(); feedback([]); };
   const start = event => held.add(event.inputSource);
-  const end = event => { held.delete(event.inputSource); grab.release(); };
-  const changed = event => { for (const source of event.removed) held.delete(source); grab.release(); };
-  const clear = () => { held.clear(); grab.release(); };
+  const remove = source => {
+    // Other transient inputs must not rebase an ongoing grab and discard motion.
+    if (!held.delete(source)) return;
+    origins.delete(source);
+    grab.release();
+    feedback([]);
+  };
+  const end = event => remove(event.inputSource);
+  const changed = event => { for (const source of event.removed) remove(source); };
+  const clear = () => { held.clear(); grab.release(); hide(); };
   session.addEventListener('selectstart', start);
   session.addEventListener('selectend', end);
   session.addEventListener('inputsourceschange', changed);
   session.addEventListener('visibilitychange', clear);
   session.addEventListener('end', clear);
-  return frame => {
-    if (session.visibilityState !== 'visible') { grab.release(); return; }
+  return (frame, time = performance.now()) => {
+    if (session.visibilityState !== 'visible') { grab.release(); hide(); return; }
     const hands = new Map();
     for (const source of held) {
       // Vision Pro transient-pointer sources provide pinch poses in gripSpace.
       // Never substitute the gaze ray: its origin is the head, not the hand.
       const pose = source.gripSpace && frame.getPose(source.gripSpace, space);
-      if (!pose) { grab.release(); return; }
+      if (!pose) { grab.release(); hide(); return; }
       const p = pose.transform.position;
-      if (![p.x, p.y, p.z].every(Number.isFinite)) { grab.release(); return; }
+      if (![p.x, p.y, p.z].every(Number.isFinite)) { grab.release(); hide(); return; }
       hands.set(source, [p.x, p.y, p.z]);
     }
+    const markers = [...hands].slice(0, 2).map(([source, position]) => {
+      if (!origins.has(source)) {
+        const used = new Set([...origins.values()].map(marker => marker.slot));
+        origins.set(source, { origin: [...position], startedAt: time, slot: used.has(0) ? 1 : 0 });
+      }
+      return { ...origins.get(source), position, elapsed: time - origins.get(source).startedAt };
+    });
+    feedback(markers);
     if (grab.update(hands)) apply();
   };
 }
