@@ -1,6 +1,8 @@
 import * as ort from './vendor/onnxruntime/ort.webgpu.min.mjs';
 import {WIDTH,HEIGHT,normalizeImage,resizeDepth} from './geometry.js';
 let depthSession, runtime, graphPointer;
+let depthModelBytes = null;
+let depthProvider = 'webgpu';
 ort.env.wasm.wasmPaths = new URL('./vendor/onnxruntime/',import.meta.url).href;
 ort.env.wasm.numThreads=1;
 ort.env.wasm.proxy=false;
@@ -25,10 +27,23 @@ async function fetchFile(url,id,label) {
 }
 async function loadDepth(id) {
   if(depthSession) return;
-  if(!navigator.gpu) throw new Error('WebGPU is unavailable in this browser worker. Use a current Safari or Chrome.');
-  const model=await fetchFile(new URL('./models/depth-anything-v2-small.onnx',import.meta.url),id,'Depth Anything V2 Small');
-  progress(id,'loading','Creating ONNX WebGPU session…');
-  depthSession=await ort.InferenceSession.create(model,{executionProviders:['webgpu'],graphOptimizationLevel:'all'});
+  if(!depthModelBytes) {
+    depthModelBytes = await fetchFile(new URL('./models/depth-anything-v2-small.onnx',import.meta.url),id,'Depth Anything V2 Small');
+  }
+  if(navigator.gpu) {
+    try {
+      progress(id,'loading','Creating ONNX WebGPU session…');
+      depthSession = await ort.InferenceSession.create(depthModelBytes,{executionProviders:['webgpu'],graphOptimizationLevel:'all'});
+      depthProvider = 'webgpu';
+      return;
+    } catch(gpuError) {
+      console.warn('WebGPU session creation failed, falling back to WASM:', gpuError);
+      progress(id,'loading','WebGPU out of memory. Falling back to CPU…');
+    }
+  }
+  progress(id,'loading','Creating ONNX WASM session…');
+  depthSession = await ort.InferenceSession.create(depthModelBytes,{executionProviders:['wasm'],graphOptimizationLevel:'all'});
+  depthProvider = 'wasm';
 }
 async function loadDetector(id) {
   if(runtime) return;
@@ -55,12 +70,25 @@ onmessage=async ({data:{id,type,rgba,depth:provided}})=>{
     let depth=provided;
     if(type==='infer') {
       await loadDepth(id);
-      progress(id,'depth','Estimating depth on WebGPU…');
+      progress(id,'depth',depthProvider==='webgpu' ? 'Estimating depth on WebGPU…' : 'Estimating depth on CPU (WASM)…');
       const start=performance.now();
       const input=new ort.Tensor('float32',normalizeImage(rgba),[1,3,HEIGHT,WIDTH]);
       let outputs;
       try {
-        outputs=await depthSession.run({[depthSession.inputNames[0]]:input});
+        try {
+          outputs=await depthSession.run({[depthSession.inputNames[0]]:input});
+        } catch(runError) {
+          if(depthProvider==='webgpu' && depthModelBytes) {
+            console.warn('Depth inference failed on WebGPU, falling back to WASM:', runError);
+            progress(id,'depth','WebGPU memory limit hit. Retrying on CPU (WASM)…');
+            try { depthSession?.release?.(); } catch(_) {}
+            depthSession = await ort.InferenceSession.create(depthModelBytes,{executionProviders:['wasm'],graphOptimizationLevel:'all'});
+            depthProvider = 'wasm';
+            outputs=await depthSession.run({[depthSession.inputNames[0]]:input});
+          } else {
+            throw runError;
+          }
+        }
         const result=outputs[depthSession.outputNames[0]];
         const values=await result.getData();
         const [h,w]=result.dims.slice(-2);

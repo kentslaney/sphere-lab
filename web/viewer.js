@@ -93,13 +93,15 @@ export async function createViewer(canvas, button, status) {
       if (canvas.width === width && canvas.height === height && depth) return;
       canvas.width = width;
       canvas.height = height;
-      context.configure({ device, format: canvasFormat, alphaMode: 'opaque' });
+      if (context) {
+        context.configure({ device, format: canvasFormat, alphaMode: 'opaque' });
+      }
       depth?.destroy();
       depth = device.createTexture({ size: [width, height], format: 'depth24plus', usage: GPUTextureUsage.RENDER_ATTACHMENT });
     }
 
     function preview(time) {
-      if (session || stopped) return;
+      if (session || stopped || !context) return;
       try {
         resize();
         renderer.set_format(canvasFormat);
@@ -124,26 +126,69 @@ export async function createViewer(canvas, button, status) {
         report(error);
       }
     }
-    previewFrame = requestAnimationFrame(preview);
+    if (context) {
+      previewFrame = requestAnimationFrame(preview);
+    }
 
-    if (!navigator.xr || !globalThis.XRGPUBinding || !await navigator.xr.isSessionSupported('immersive-vr')) {
-      status.textContent = 'Drag to look · Scroll to move forward · VR requires a compatible headset.';
+    let xrSupported = false;
+    try {
+      xrSupported = !!(navigator.xr && globalThis.XRGPUBinding && await navigator.xr.isSessionSupported('immersive-vr'));
+    } catch (_) {
+      xrSupported = false;
+    }
+
+    if (!xrSupported) {
+      status.textContent = context
+        ? 'Drag to look · Scroll to move forward · VR requires a compatible headset.'
+        : '2D canvas WebGPU preview unavailable · VR requires a compatible headset.';
     } else {
-      status.textContent = 'Drag to look · Scroll to move forward · VR: one pinch to move · Two pinches to scale.';
+      status.textContent = context
+        ? 'Drag to look · Scroll to move forward · VR: one pinch to move · Two pinches to scale.'
+        : 'VR: one pinch to move · Two pinches to scale · Tap Enter VR to begin.';
       button.disabled = false;
+      let sessionStarting = false;
       button.addEventListener('click', async () => {
+        if (sessionStarting) return;
+        if (session) {
+          button.disabled = true;
+          try {
+            await session.end();
+          } catch (e) {
+            report(e);
+          } finally {
+            button.disabled = stopped;
+          }
+          return;
+        }
+
+        sessionStarting = true;
+        let sessionPromise;
+        try {
+          // On Apple Vision Pro (visionOS Safari), requestSession MUST be initiated synchronously in the user gesture.
+          // Disabling the button before requestSession drops transient activation and causes "The operation is insecure".
+          sessionPromise = navigator.xr.requestSession('immersive-vr', {
+            requiredFeatures: ['local'],
+            optionalFeatures: ['webgpu', 'hand-tracking']
+          });
+        } catch (error) {
+          sessionStarting = false;
+          report(error);
+          return;
+        }
+
         button.disabled = true;
         try {
-          if (session) { await session.end(); return; }
-          const active = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['webgpu'] });
+          const active = await sessionPromise;
+          sessionStarting = false;
           session = active;
-          cancelAnimationFrame(previewFrame);
+          if (previewFrame) cancelAnimationFrame(previewFrame);
           active.addEventListener('end', () => {
             session = null;
             button.textContent = 'Enter VR';
             button.disabled = stopped;
             renderer.set_hud(new Float32Array());
-            if (!stopped) {
+            renderer.set_grab_feedback(new Float32Array());
+            if (!stopped && context) {
               status.textContent = 'Ready to enter VR again.';
               previewFrame = requestAnimationFrame(preview);
             }
@@ -196,11 +241,15 @@ export async function createViewer(canvas, button, status) {
             }
             active.requestAnimationFrame(frame);
           } catch (error) {
-            await active.end();
+            try { await active.end(); } catch (_) {}
             throw error;
           }
-        } catch (error) { report(error); }
-        finally { button.disabled = stopped; }
+        } catch (error) {
+          report(error);
+        } finally {
+          sessionStarting = false;
+          button.disabled = stopped;
+        }
       });
     }
 
@@ -289,9 +338,20 @@ export async function createViewer(canvas, button, status) {
       notifyPose();
     });
 
+    const endDrag = () => {
+      if (drag) {
+        drag = null;
+        renderer.set_grab_feedback(new Float32Array());
+      }
+    };
+
     for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
-      canvas.addEventListener(type, () => drag = null);
+      canvas.addEventListener(type, () => {
+        drag = null;
+        renderer.set_grab_feedback(new Float32Array());
+      });
     }
+    window.addEventListener('mouseup', endDrag);
 
     canvas.addEventListener('wheel', event => {
       event.preventDefault();
