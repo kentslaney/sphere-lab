@@ -10,7 +10,7 @@ function stage(id,state){$(`stage-${id}`).className=state;}
 function updateScaleKey() {
   const key=$('scale-key');
   if(!key) return;
-  const isEnabled=$('scale-legend')?.checked && cloudVertices;
+  const isEnabled=$('scale-legend')?.checked ?? true;
   if(!isEnabled) { key.hidden=true; return; }
   key.hidden=false;
   const cam=viewer?.getCamera()||{yaw:0,pitch:0,distance:2,scale:1};
@@ -159,3 +159,4 @@ try {
   if(depth)rebuild();
 }
 catch(error){$('viewer-status').textContent=`3D view unavailable: ${error.message}`;}
+updateScaleKey();
