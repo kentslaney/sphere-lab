@@ -313,7 +313,7 @@ impl Renderer {
                         })],
                     }),
                     primitive: wgpu::PrimitiveState {
-                        cull_mode: if is_shell { Some(wgpu::Face::Back) } else { None },
+                        cull_mode: None,
                         topology: if is_point || is_shell || is_hud {
                             wgpu::PrimitiveTopology::TriangleList
                         } else {
@@ -422,9 +422,11 @@ impl Renderer {
     }
 
     pub fn set_pose(&mut self, yaw: f32, pitch: f32, distance: f32) {
-        self.yaw = yaw;
-        self.pitch = pitch;
-        self.distance = distance.clamp(0.6, 5.);
+        if [yaw, pitch, distance].iter().all(|v| v.is_finite()) {
+            self.yaw = yaw;
+            self.pitch = pitch;
+            self.distance = distance;
+        }
     }
 
     pub fn set_grab(&mut self, x: f32, y: f32, z: f32, scale: f32) {

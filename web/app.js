@@ -1,5 +1,5 @@
 import {createViewer} from './viewer.js';
-import {WIDTH,HEIGHT,pointCloud,sphereLines,selectDetections,depthRange,cloudBounds,computeViewportPinchScale} from './geometry.js';
+import {WIDTH,HEIGHT,pointCloud,sphereLines,selectDetections,depthRange,cloudBounds} from './geometry.js';
 const $=id=>document.getElementById(id);
 let viewer=null, worker=null, job=0, rgba=null, depth=null, candidates=null, range=null, bounds=null, cloudVertices=null;
 let selected=[], sourceName='', depthMs=0, detectorMs=0, busy=false;
@@ -7,27 +7,6 @@ const photo=$('photo').getContext('2d'),depthCanvas=$('depth').getContext('2d');
 function status(message,error=false){$('status').textContent=message;$('status').classList.toggle('error',error);}
 function controls(running){busy=running;$('file').disabled=running;$('example').disabled=running;$('cancel').hidden=!running;}
 function stage(id,state){$(`stage-${id}`).className=state;}
-function updateScaleKey() {
-  const key=$('scale-key');
-  if(!key) return;
-  const isEnabled=$('scale-legend')?.checked ?? true;
-  viewer?.setHudVisible(isEnabled);
-  if(!isEnabled) { key.hidden=true; return; }
-  key.hidden=false;
-  const cam=viewer?.getCamera()||{yaw:0,pitch:0,distance:2,scale:1};
-  const scene=$('scene');
-  const info=computeViewportPinchScale(cloudVertices,{
-    yaw:cam.yaw,
-    pitch:cam.pitch,
-    distance:cam.distance,
-    scale:cam.scale,
-    width:scene.clientWidth||WIDTH,
-    height:scene.clientHeight||HEIGHT,
-  });
-  $('scale-key-depth').textContent=`Depth ${info.avgDepth.toFixed(2)} m`;
-  $('scale-bar-line').style.width=`${Math.round(info.barWidthPx)}px`;
-  $('scale-bar-label').textContent=info.label;
-}
 function rebuild(updateCloud=true) {
   if(!depth||!rgba) return;
   const spread=Number($('spread').value), threshold=Number($('threshold').value);
@@ -135,9 +114,7 @@ $('cancel').addEventListener('click',()=>{++job;worker?.terminate();worker=null;
 for(const id of ['spread','threshold'])$(''+id).addEventListener('input',()=>{
   $(`${id}-value`).value=Number($(id).value).toFixed(2);rebuild(id==='spread');
 });
-$('scale-legend').addEventListener('change',()=>{rebuild(false);updateScaleKey();});
 $('outlines').addEventListener('change',()=>rebuild(false));
-window.addEventListener('resize',()=>updateScaleKey());
 $('reset').addEventListener('click',()=>viewer?.reset());
 $('download').addEventListener('click',()=>{
   if(!candidates)return;
@@ -152,8 +129,6 @@ $('download').addEventListener('click',()=>{
 });
 try {
   viewer=await createViewer($('scene'),$('enter'),$('viewer-status'));
-  viewer.onPose(()=>updateScaleKey());
   if(depth)rebuild();
 }
 catch(error){$('viewer-status').textContent=`3D view unavailable: ${error.message}`;}
-updateScaleKey();
