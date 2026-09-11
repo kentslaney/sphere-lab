@@ -12,7 +12,6 @@ models/example.jpg
 runtime/generated/
 tests/generated/
 
-
 /web/models/
 /web/runtime/
 /web/vendor/
