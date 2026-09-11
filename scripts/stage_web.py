@@ -10,6 +10,9 @@ def stage_web():
         'models/depth-anything-v2-small.onnx',
         'models/sphere-detector.vmfb',
         'models/example.jpg',
+        'models/font_atlas.png',
+        'models/font_atlas.bin',
+        'models/font_metrics.json',
         'runtime/generated/sphere_runtime.mjs',
         'runtime/generated/sphere_runtime.wasm',
     ]

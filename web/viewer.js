@@ -186,7 +186,7 @@ export async function createViewer(canvas, button, status) {
           // Disabling the button before requestSession drops transient activation and causes "The operation is insecure".
           sessionPromise = navigator.xr.requestSession('immersive-vr', {
             requiredFeatures: ['local'],
-            optionalFeatures: ['webgpu', 'hand-tracking']
+            optionalFeatures: ['webgpu']
           });
         } catch (error) {
           sessionStarting = false;
@@ -222,6 +222,7 @@ export async function createViewer(canvas, button, status) {
             button.textContent = 'Exit VR';
             status.textContent = 'VR: pinch and move to grab · Pinch with both hands and spread to scale.';
             grab.release();
+            applyGrab();
             renderer.set_hud(new Float32Array());
             let currentViewerPos = [0, 0, 0];
             const updateGrab = attachCloudGrab(active, space, grab, applyGrab, markers => {

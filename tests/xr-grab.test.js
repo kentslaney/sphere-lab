@@ -101,3 +101,43 @@ test('unrelated XR input events do not discard held-hand movement', () => {
   }
   assert.deepEqual(g.position, [1, 0, -2]);
 });
+
+test('fallback to targetRaySpace when gripSpace is missing allows translation', () => {
+  const listeners = {};
+  const session = { visibilityState: 'visible', addEventListener: (name, fn) => listeners[name] = fn };
+  const g = new CloudGrab(); let changes = 0;
+  const update = attachCloudGrab(session, {}, g, () => changes++);
+  const raySource = { targetRaySpace: {} }; // no gripSpace
+  const frame = x => ({ getPose: space => space === raySource.targetRaySpace ? ({ transform: { position: { x, y: 0, z: -1 } } }) : null });
+  listeners.selectstart({ inputSource: raySource });
+  update(frame(0)); update(frame(1));
+  assert.equal(changes, 1);
+  assert.deepEqual(g.position, [1, 0, -2]);
+});
+
+test('two-hand start origins synchronize when second hand joins to anchor scale line', () => {
+  const listeners = {};
+  const session = { visibilityState: 'visible', addEventListener: (name, fn) => listeners[name] = fn };
+  const g = new CloudGrab();
+  let markers = [];
+  const update = attachCloudGrab(session, {}, g, () => {}, m => { markers = m; });
+  const a = { gripSpace: { x: 0 } }, b = { gripSpace: { x: 0.5 } };
+  const frame = { getPose: s => ({ transform: { position: { x: s.x, y: 0, z: -1 } } }) };
+  // Hand A starts alone at x = 0
+  listeners.selectstart({ inputSource: a });
+  update(frame);
+  assert.equal(markers.length, 1);
+  assert.deepEqual(markers[0].origin, [0, 0, -1]);
+  // Hand A moves to x = 0.4
+  a.gripSpace.x = 0.4;
+  update(frame);
+  assert.equal(markers.length, 1);
+  // Hand B joins at x = 0.5 to begin two-hand pinch
+  listeners.selectstart({ inputSource: b });
+  update(frame);
+  assert.equal(markers.length, 2);
+  // Both origins are synchronized to current positions when 2-hand gesture starts
+  assert.deepEqual(markers[0].origin, [0.4, 0, -1]);
+  assert.deepEqual(markers[1].origin, [0.5, 0, -1]);
+});
+

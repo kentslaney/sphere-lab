@@ -53,14 +53,15 @@ export class CloudGrab {
 export function attachCloudGrab(session, space, grab, apply, feedback = () => {}) {
   const held = new Set();
   const origins = new Map();
-  const hide = () => { origins.clear(); feedback([]); };
+  let lastHandCount = 0;
+  const hide = () => { origins.clear(); lastHandCount = 0; feedback([]); };
   const start = event => held.add(event.inputSource);
   const remove = source => {
     // Other transient inputs must not rebase an ongoing grab and discard motion.
     if (!held.delete(source)) return;
     origins.delete(source);
     grab.release();
-    feedback([]);
+    if (held.size === 0) hide();
   };
   const end = event => remove(event.inputSource);
   const changed = event => { for (const source of event.removed) remove(source); };
@@ -74,20 +75,42 @@ export function attachCloudGrab(session, space, grab, apply, feedback = () => {}
     if (session.visibilityState !== 'visible') { grab.release(); hide(); return; }
     const hands = new Map();
     for (const source of held) {
-      // Vision Pro transient-pointer sources provide pinch poses in gripSpace.
-      // Never substitute the gaze ray: its origin is the head, not the hand.
-      const pose = source.gripSpace && frame.getPose(source.gripSpace, space);
-      if (!pose) { grab.release(); hide(); return; }
+      // Use gripSpace when available (tracked hands/controllers), fallback to targetRaySpace
+      const targetSpace = source.gripSpace || source.targetRaySpace;
+      const pose = targetSpace && frame.getPose(targetSpace, space);
+      if (!pose) continue;
       const p = pose.transform.position;
-      if (![p.x, p.y, p.z].every(Number.isFinite)) { grab.release(); hide(); return; }
+      if (![p.x, p.y, p.z].every(Number.isFinite)) continue;
       hands.set(source, [p.x, p.y, p.z]);
     }
-    const markers = [...hands].slice(0, 2).map(([source, position]) => {
+    if (hands.size === 0) {
+      if (held.size > 0) {
+        grab.release();
+        hide();
+      }
+      return;
+    }
+    const activeEntries = [...hands].slice(0, 2);
+    for (const [source, position] of activeEntries) {
       if (!origins.has(source)) {
         const used = new Set([...origins.values()].map(marker => marker.slot));
         origins.set(source, { origin: [...position], startedAt: time, slot: used.has(0) ? 1 : 0 });
       }
-      return { ...origins.get(source), position, elapsed: time - origins.get(source).startedAt };
+    }
+    // When transitioning to 2 hands (two-hand pinch begins), synchronize the gesture start points
+    // so the measurement line and scaling formula D = S0^2 / S1 are anchored to where both hands
+    // actually are at the start of the two-hand pinch.
+    if (activeEntries.length === 2 && lastHandCount < 2) {
+      for (const [source, position] of activeEntries) {
+        const slot = origins.get(source).slot;
+        origins.set(source, { origin: [...position], startedAt: time, slot });
+      }
+    }
+    lastHandCount = activeEntries.length;
+
+    const markers = activeEntries.map(([source, position]) => {
+      const rec = origins.get(source);
+      return { ...rec, position, elapsed: time - rec.startedAt };
     });
     feedback(markers);
     if (grab.update(hands)) apply();
