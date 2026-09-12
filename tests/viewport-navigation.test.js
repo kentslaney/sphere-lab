@@ -57,3 +57,9 @@ test('wheel horizontal and vertical deltas map to camera right and depth, includ
   const rotated = { right: [0, 0, -1], forward: [-1, 0, 0] };
   near(wheelTranslation({ deltaX: 10, deltaY: 20, deltaMode: 0 }, rotated, 500), [0.04, 0, -0.02]);
 });
+
+test('Shift scroll uses camera up instead of depth and preserves horizontal scrolling', () => {
+  near(wheelTranslation({ deltaX: 10, deltaY: 20, deltaMode: 0, shiftKey: true }, basis, 500), [0.02, -0.04, 0]);
+  const tilted = { right: [1, 0, 0], up: [0, 0.8, 0.6], forward: [0, 0.6, -0.8] };
+  near(wheelTranslation({ deltaX: 0, deltaY: -1, deltaMode: 1, shiftKey: true }, tilted, 500), [0, 0.0256, 0.0192]);
+});

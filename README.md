@@ -43,7 +43,8 @@ reissued and any new root trusted on the headset.
 Select **Choose an image** or **Try example photo**. The analysis uses a center
 crop at 518 × 392; the left preview shows exactly what is analyzed. Depth is shown
 as soon as ONNX completes, before the detector runs. Drag with a mouse to look
-around. Vertical scrolling moves along camera depth; horizontal trackpad
+around. Vertical scrolling moves along camera depth; holding Shift moves along
+camera up/down instead. Horizontal trackpad
 scrolling moves along camera right. On devices matching CSS `(pointer: coarse)`, tap the
 viewport to enter full screen before interacting; the initial tap leaves the
 camera in place. An **Exit full screen** button returns to the page. Browsers

@@ -51,5 +51,6 @@ export function solveTouchCamera(camera, basis, touches) {
 
 export function wheelTranslation(event, basis, height) {
   const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? height : 1;
-  return basis.forward.map((v, i) => 0.002 * unit * (basis.right[i] * event.deltaX - v * event.deltaY));
+  const axis = event.shiftKey ? basis.up : basis.forward;
+  return axis.map((v, i) => 0.002 * unit * (basis.right[i] * event.deltaX - v * event.deltaY));
 }
