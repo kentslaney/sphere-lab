@@ -165,7 +165,7 @@ test('quick quiet grab opens on Cancel; second grab motion selects without movin
   assert.deepEqual(h.selected, [1]); assert.equal(h.shown.at(-1), null);
 });
 
-test('immediate second release cancels even before a frame; test option also closes', () => {
+test('immediate second release cancels even before a frame; config selection also closes the context menu', () => {
   const h = menuHarness();
   h.event('selectstart', 0); h.frame(0); h.event('selectend', 100);
   h.event('selectstart', 200); h.event('selectend', 201);

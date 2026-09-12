@@ -1,6 +1,9 @@
-import { menuPixels, menuVertices, MENU_WIDTH, MENU_HEIGHT } from './xr-menu.js';
+import { attachViewportActivation } from './viewport-activation.js';
+import { raycastDistance, solveTouchCamera, wheelTranslation } from './viewport-navigation.js';
+import { XRConfig } from './config.js';
+import { menuPixels, menuVertices, menuHeight, MENU_WIDTH, MENU_HEIGHT } from './xr-menu.js';
 import { grabFeedbackVertices, buildDebugSphereVertices } from './xr-feedback.js';
-import { CloudGrab, attachCloudGrab } from './xr-grab.js';
+import { CloudGrab, attachCloudGrab, rotate } from './xr-grab.js';
 
 async function loadWasmBytes(url) {
   let lastError;
@@ -17,7 +20,7 @@ async function loadWasmBytes(url) {
   throw lastError;
 }
 
-export async function createViewer(canvas, button, status) {
+export async function createViewer(canvas, button, status, options = {}) {
   const identity = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
   const report = error => {
     console.error(error);
@@ -40,6 +43,9 @@ export async function createViewer(canvas, button, status) {
     let yaw = 0, pitch = 0;
     let drag = null;
     let cloudPoints = null;
+    let worldPoints = null, worldDirty = true;
+    let modelOffset = [0, 0, 0], modelScale = 1, modelRotation = [0, 0, 0, 1];
+    const config = new XRConfig(options.getConfig ?? (() => ({ spread: 1, threshold: 0.1, outlines: true })), options.setConfig ?? (() => {}));
 
     renderer.set_pose(0, 0, 0);
     renderer.set_grab(0, 0, 0, 1);
@@ -68,6 +74,7 @@ export async function createViewer(canvas, button, status) {
     };
 
     const applyGrab = () => {
+      modelOffset = [...grab.position]; modelScale = grab.scale; modelRotation = [...grab.rotation]; worldDirty = true;
       renderer.set_grab(grab.position[0], grab.position[1], grab.position[2], grab.scale);
       renderer.set_grab_rotation(new Float32Array(grab.rotation));
     };
@@ -161,9 +168,9 @@ export async function createViewer(canvas, button, status) {
     }
 
     if (!xrSupported) {
-      status.textContent = 'Drag to look · Scroll to move forward · VR requires a compatible headset.';
+      status.textContent = 'Drag to look · Scroll sideways or forward · Touch: tap to expand, then drag or pinch.';
     } else {
-      status.textContent = 'Drag to look · Scroll to move forward · VR: one pinch to move · Two pinches to scale.';
+      status.textContent = 'Drag to look · Scroll sideways or forward · VR: pinch to grab, quick double pinch for config.';
       button.disabled = false;
       let sessionStarting = false;
       button.addEventListener('click', async () => {
@@ -205,6 +212,7 @@ export async function createViewer(canvas, button, status) {
             session = null;
             button.textContent = 'Enter VR';
             button.disabled = stopped;
+            config.close(); renderer.set_menu(new Float32Array());
             renderer.set_hud(new Float32Array());
             renderer.set_grab_feedback(new Float32Array());
             if (!stopped) {
@@ -226,7 +234,8 @@ export async function createViewer(canvas, button, status) {
             applyGrab();
             renderer.set_hud(new Float32Array());
             let currentViewerPos = [0, 0, 0];
-            let menuSelection = -1;
+            let menuSelection = -1, menuOrigin = [0, 0, -1], configTexture = '';
+            let configWasOpen = false;
             const updateGrab = attachCloudGrab(active, space, grab, applyGrab, markers => {
               const feedback = grabFeedbackVertices(markers, currentViewerPos);
               renderer.set_grab_feedback(feedback);
@@ -236,8 +245,15 @@ export async function createViewer(canvas, button, status) {
                 renderer.set_menu_texture(menuPixels(menu.selected), MENU_WIDTH, MENU_HEIGHT);
                 menuSelection = menu.selected;
               }
+              menuOrigin = [...menu.origin];
               renderer.set_menu(menuVertices(menu.origin, currentViewerPos));
-            });
+            }, selected => {
+              if (selected !== 0) return;
+              const dx = currentViewerPos[0] - menuOrigin[0], dz = currentViewerPos[2] - menuOrigin[2];
+              const length = Math.hypot(dx, dz);
+              config.open(menuOrigin, length > 1e-5 ? [dz / length, 0, -dx / length] : [1, 0, 0]);
+              configTexture = ''; menuSelection = -1;
+            }, config);
             function frame(time, xrFrame) {
               if (session !== active || stopped) return;
               // Request next frame at the start so visionOS compositor watchdog never times out
@@ -249,6 +265,17 @@ export async function createViewer(canvas, button, status) {
                   currentViewerPos = [p.x, p.y, p.z];
                 }
                 updateGrab(xrFrame, time);
+                if (config.isOpen) {
+                  const items = config.items(), hint = 'Move up/down to choose · Left/right to adjust';
+                  const key = JSON.stringify([items, config.selected]);
+                  const height = menuHeight(items, hint);
+                  if (key !== configTexture) {
+                    renderer.set_menu_texture(menuPixels(config.selected, items, hint), MENU_WIDTH, height);
+                    configTexture = key;
+                  }
+                  renderer.set_menu(menuVertices(config.origin, currentViewerPos, height, 3));
+                } else if (configWasOpen) renderer.set_menu(new Float32Array());
+                configWasOpen = config.isOpen;
                 if (viewerPose) {
                   for (const view of viewerPose.views) {
                     const image = binding.getViewSubImage(layer, view);
@@ -311,38 +338,38 @@ export async function createViewer(canvas, button, status) {
     }
 
     function resolveRaycastDistance(rayDir, canvasH, fFov) {
-      const fallbackDist = 2.0;
-      if (!cloudPoints || cloudPoints.length < 6) return fallbackDist;
-      const pixelThreshold = 30;
-      const angularThresh = pixelThreshold / (canvasH * fFov);
-      const angularThreshSq = angularThresh * angularThresh;
-      let bestT = -1;
-      const step = cloudPoints.length > 300000 ? 12 : 6;
-      for (let i = 0; i < cloudPoints.length; i += step) {
-        const px = cloudPoints[i] - camPos[0];
-        const py = cloudPoints[i + 1] - camPos[1];
-        const pz = cloudPoints[i + 2] - camPos[2];
-        const t = px * rayDir[0] + py * rayDir[1] + pz * rayDir[2];
-        if (t < 0.05 || t > 50) continue;
-        const perpSq = (px * px + py * py + pz * pz) - t * t;
-        if (perpSq / (t * t) < angularThreshSq) {
-          if (t < bestT || bestT < 0) {
-            bestT = t;
-          }
+      if (worldDirty) {
+        worldPoints = cloudPoints && new Float32Array(cloudPoints.length);
+        for (let i = 0; i < (cloudPoints?.length ?? 0); i += 6) {
+          const p = rotate(modelRotation, Array.from(cloudPoints.subarray(i, i + 3), v => v * modelScale));
+          worldPoints.set(p.map((v, j) => v + modelOffset[j]), i);
         }
+        worldDirty = false;
       }
-      return bestT > 0 ? bestT : fallbackDist;
+      return raycastDistance(worldPoints, camPos, rayDir, getCameraVectors().forward, canvasH, fFov);
     }
 
+    const touches = new Map();
+    const clearPointers = () => { touches.clear(); drag = null; renderer.set_grab_feedback(new Float32Array()); };
+    const acceptsInput = attachViewportActivation(canvas, document.getElementById('viewport-exit'), clearPointers, () => !session && !stopped, report);
+
     canvas.addEventListener('pointerdown', event => {
+      if (!acceptsInput() || (event.pointerType === 'mouse' && event.button !== 0)) return;
+      if (event.pointerType !== 'touch' && (drag || touches.size)) return;
       canvas.setPointerCapture(event.pointerId);
-      const { normCamRay, worldRay, h, fFov } = getRaycast(event.clientX, event.clientY);
+      const { worldRay, h, fFov } = getRaycast(event.clientX, event.clientY);
       const dist = resolveRaycastDistance(worldRay, h, fFov);
       const targetPoint = [
         camPos[0] + dist * worldRay[0],
         camPos[1] + dist * worldRay[1],
         camPos[2] + dist * worldRay[2]
       ];
+
+      if (event.pointerType === 'touch') {
+        touches.set(event.pointerId, { point: targetPoint, clientX: event.clientX, clientY: event.clientY });
+        drag = null;
+        return;
+      }
 
       // Add a debug sphere at the distance where the raycast is being resolved
       const debugSphere = buildDebugSphereVertices(targetPoint, 0.04, [0.2, 0.9, 0.8], 0.75);
@@ -356,6 +383,7 @@ export async function createViewer(canvas, button, status) {
       const targetElevation = Math.asin(Math.max(-1, Math.min(1, vy / vLen)));
 
       drag = {
+        pointerId: event.pointerId,
         targetPoint,
         targetAzimuth,
         targetElevation
@@ -363,7 +391,16 @@ export async function createViewer(canvas, button, status) {
     });
 
     canvas.addEventListener('pointermove', event => {
-      if (!drag) return;
+      if (!acceptsInput()) return;
+      if (touches.has(event.pointerId)) {
+        const touch = touches.get(event.pointerId);
+        touch.clientX = event.clientX; touch.clientY = event.clientY;
+        camPos = solveTouchCamera(camPos, getCameraVectors(), [...touches.values()].map(t => ({
+          point: t.point, ray: getRaycast(t.clientX, t.clientY).worldRay,
+        })));
+        notifyPose(); return;
+      }
+      if (!drag || drag.pointerId !== event.pointerId) return;
       const { normCamRay } = getRaycast(event.clientX, event.clientY);
       const camAlphaX = Math.atan2(-normCamRay[0], -normCamRay[2]);
       const camAlphaY = Math.asin(Math.max(-1, Math.min(1, normCamRay[1])));
@@ -373,40 +410,35 @@ export async function createViewer(canvas, button, status) {
       notifyPose();
     });
 
-    const endDrag = () => {
-      if (drag) {
-        drag = null;
-        renderer.set_grab_feedback(new Float32Array());
-      }
-    };
-
     for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
-      canvas.addEventListener(type, () => {
-        drag = null;
-        renderer.set_grab_feedback(new Float32Array());
+      canvas.addEventListener(type, event => {
+        touches.delete(event.pointerId);
+        if (drag?.pointerId === event.pointerId) { drag = null; renderer.set_grab_feedback(new Float32Array()); }
       });
     }
-    window.addEventListener('mouseup', endDrag);
+    canvas.addEventListener('contextmenu', event => {
+      if (!acceptsInput()) return;
+      event.preventDefault(); clearPointers(); options.showConfig?.();
+    });
 
     canvas.addEventListener('wheel', event => {
+      if (!acceptsInput() || touches.size || drag) return;
       event.preventDefault();
-      // Scroll moves forward along view gaze, not inwards
-      const delta = -event.deltaY * 0.002;
-      const { forward } = getCameraVectors();
-      camPos[0] += forward[0] * delta;
-      camPos[1] += forward[1] * delta;
-      camPos[2] += forward[2] * delta;
+      const delta = wheelTranslation(event, getCameraVectors(), canvas.clientHeight);
+      camPos = camPos.map((v, i) => v + delta[i]);
       notifyPose();
     }, { passive: false });
 
     return {
       setCloud: points => {
-        cloudPoints = points;
+        cloudPoints = points; worldDirty = true; clearPointers();
         renderer.set_cloud(points);
       },
       setLines: lines => renderer.set_lines(lines),
       setHud: vertices => renderer.set_hud(vertices),
       reset: () => {
+        clearPointers(); config.close(); renderer.set_menu(new Float32Array());
+        modelOffset = [0, 0, 0]; modelScale = 1; modelRotation = [0, 0, 0, 1]; worldDirty = true;
         camPos = [0, 0, 2];
         yaw = 0;
         pitch = 0;
@@ -414,12 +446,14 @@ export async function createViewer(canvas, button, status) {
         grab.reset();
         renderer.set_pose(0, 0, 0);
         renderer.set_grab(0, 0, 0, 1);
+        renderer.set_grab_rotation(new Float32Array(modelRotation));
         renderer.set_grab_feedback(new Float32Array());
         renderer.set_hud(new Float32Array());
         notifyPose();
       },
       clear: () => {
-        cloudPoints = null;
+        clearPointers(); config.close(); renderer.set_menu(new Float32Array());
+        cloudPoints = null; worldPoints = null; worldDirty = true;
         renderer.set_cloud(new Float32Array());
         renderer.set_lines(new Float32Array());
         renderer.set_hud(new Float32Array());

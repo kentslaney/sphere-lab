@@ -50,20 +50,22 @@ export class CloudGrab {
   }
 }
 
-export function attachCloudGrab(session, space, grab, apply, feedback = () => {}, menu = () => {}, select = () => {}) {
+export function attachCloudGrab(session, space, grab, apply, feedback = () => {}, menu = () => {}, select = () => {}, config = null) {
   const held = new Set();
   const origins = new Map();
   let lastHandCount = 0;
   let candidate = null, pending = null, activeMenu = null;
   const now = event => event.frame?.predictedDisplayTime ?? performance.now();
   const closeMenu = (commit = false) => {
-    if (activeMenu && commit) select(activeMenu.selected);
+    const selected = activeMenu?.selected;
     activeMenu = null; menu(null);
+    if (selected !== undefined && commit) select(selected);
   };
   const hide = () => { origins.clear(); lastHandCount = 0; feedback([]); };
   const start = event => {
     if (held.has(event.inputSource)) return;
     const time = now(event);
+    if (config?.isOpen) { held.add(event.inputSource); candidate = null; pending = null; return; }
     if (!held.size && pending && time - pending.time <= 350 && time >= pending.time) {
       activeMenu = { source: event.inputSource, origin: null, selected: 1 };
       candidate = null;
@@ -84,15 +86,16 @@ export function attachCloudGrab(session, space, grab, apply, feedback = () => {}
   };
   const end = event => {
     const source = event.inputSource, time = now(event);
-    if (activeMenu?.source === source) closeMenu(true);
+    if (config?.isOpen) config.end(source);
+    else if (activeMenu?.source === source) closeMenu(true);
     else if (candidate?.source === source && candidate.origin && !candidate.moved && time - candidate.time <= 250 && held.size === 1) {
       pending = { time };
     }
     if (candidate?.source === source) candidate = null;
     remove(source);
   };
-  const changed = event => { for (const source of event.removed) { if (held.has(source)) { candidate = null; pending = null; closeMenu(); } remove(source); } };
-  const clear = () => { candidate = null; pending = null; closeMenu(); held.clear(); grab.release(); hide(); };
+  const changed = event => { for (const source of event.removed) { if (held.has(source)) { candidate = null; pending = null; closeMenu(); config?.cancelGrab(); } remove(source); } };
+  const clear = () => { config?.close(); candidate = null; pending = null; closeMenu(); held.clear(); grab.release(); hide(); };
   session.addEventListener('selectstart', start);
   session.addEventListener('selectend', end);
   session.addEventListener('inputsourceschange', changed);
@@ -112,12 +115,14 @@ export function attachCloudGrab(session, space, grab, apply, feedback = () => {}
     }
     if (hands.size === 0) {
       if (held.size > 0) {
+        config?.cancelGrab();
         candidate = null; pending = null; closeMenu();
         grab.release();
         hide();
       }
       return;
     }
+    if (config?.isOpen) { config.update(hands); grab.release(); hide(); return; }
     if (candidate) {
       const p = hands.get(candidate.source);
       if (!p) candidate = null;

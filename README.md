@@ -42,9 +42,34 @@ reissued and any new root trusted on the headset.
 
 Select **Choose an image** or **Try example photo**. The analysis uses a center
 crop at 518 × 392; the left preview shows exactly what is analyzed. Depth is shown
-as soon as ONNX completes, before the detector runs. Drag the point cloud to orbit,
-scroll to zoom, or select **Enter VR** on a compatible headset. In VR, pinch and hold with one hand to move the cloud. Pinch with both hands to scale and rotate around the grab points; release to leave it in place. Scaling is limited to 0.1–10×. A short pinch (up to 250 ms, moving no more than 2 cm) followed within 350 ms by another pinch opens a context menu. Keep holding the second pinch and move upward to highlight **Test option**, or back down to **Cancel**; release to select and close. Cancel starts selected, so immediately releasing closes the menu. Both entries currently do nothing. Menu text and styling are drawn in JavaScript and uploaded as an RGBA texture sampled by WGSL. Missing hand tracking pauses the gesture and rebases on recovery. **Reset view** restores placement, rotation, and scale after exiting VR. Adjust the score
-threshold, depth spread, and detection visibility. **Export results** saves the
+as soon as ONNX completes, before the detector runs. Drag with a mouse to look
+around. Vertical scrolling moves along camera depth; horizontal trackpad
+scrolling moves along camera right. On devices without a fine pointer, tap the
+viewport to enter full screen before interacting; the initial tap leaves the
+camera in place. An **Exit full screen** button returns to the page. Browsers
+without native fullscreen use a full-window view. One touch pans; multiple
+touches pan and move the camera in depth at a fixed field of view. Each touch
+anchors a raycast point; empty areas use the cloud's median visible depth plane
+(or a two-meter plane without a cloud). Motion that cannot satisfy all anchors
+with translation uses a least-squares fit.
+
+Select **Enter VR** on a compatible headset. Pinch and hold with one hand to
+move the cloud, or both hands to scale and rotate around the grab points.
+Release to leave it in place. Scaling is limited to 0.1–10×. A short pinch
+(up to 250 ms, moving no more than 2 cm) followed within 350 ms by another pinch
+opens a context menu. Move the second pinch upward to highlight **config**, or
+back down to **Cancel**; release to select. Cancel starts selected, so an
+immediate release closes the menu. Config shows the same Depth spread,
+Minimum score, and Show detections values as the page. While holding a pinch,
+move up/down to choose a row and left/right to adjust spread or score. Release
+on Show detections to toggle it, or Done to close. Menu and config text and
+styling are drawn in JavaScript and uploaded as an RGBA texture sampled by WGSL.
+Missing hand tracking pauses the gesture and rebases on recovery.
+
+**Config** (or right-clicking the active viewport) also opens the controls outside
+VR, including in full screen. Depth spread uses a logarithmic 0.25–4× range,
+with 1× at the midpoint. **Reset view** restores placement, rotation, and scale
+after exiting VR. **Export results** saves the
 raw candidates, filtered image detections, settings, and timings as JSON.
 **Cancel** terminates the inference worker; a later job creates a fresh runtime.
 

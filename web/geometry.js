@@ -36,7 +36,9 @@ export function depthRange(depth) {
 // Relative inverse depth becomes a bounded display distance, not metric depth.
 export function displayZ(d, range, spread=1) {
   const t = Math.max(0, Math.min(1,(d-range[0])/Math.max(1e-6,range[1]-range[0])));
-  return 2 + spread * (1/(0.45+1.55*t)-1);
+  // At 4× the nearest depths would collapse to zero; retain a positive
+  // distance just beyond the preview camera's near plane.
+  return Math.max(0.06, 2 + spread * (1/(0.45+1.55*t)-1));
 }
 export function pointAt(x,y,d,range,spread=1) {
   const z=displayZ(d,range,spread);

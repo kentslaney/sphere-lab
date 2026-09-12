@@ -90,3 +90,11 @@ test('computeViewportPinchScale calculates average depth and scales with camera 
   assert.equal(fallback.avgDepth, 2.5);
   assert.ok(fallback.barWidthPx > 0);
 });
+
+test('maximum depth spread keeps near samples in front of the camera without collapsing to a point', () => {
+  assert.equal(displayZ(10, [1,10], 4), 0.06);
+  const point = pointAt(0,0,10,[1,10],4);
+  assert.ok(point.every(Number.isFinite));
+  assert.ok(point[0] < 0); assert.ok(point[1] > 0);
+  assert.ok(2 - point[2] > 0.05);
+});

@@ -1,3 +1,4 @@
+import {spreadFromSlider, spreadToSlider} from './config.js';
 import {requestModelPersistence} from './model-cache.js';
 import {createViewer} from './viewer.js';
 import {WIDTH,HEIGHT,pointCloud,sphereLines,selectDetections,depthRange,cloudBounds} from './geometry.js';
@@ -10,7 +11,7 @@ function controls(running){busy=running;$('file').disabled=running;$('example').
 function stage(id,state){$(`stage-${id}`).className=state;}
 function rebuild(updateCloud=true) {
   if(!depth||!rgba) return;
-  const spread=Number($('spread').value), threshold=Number($('threshold').value);
+  const spread=spreadFromSlider($('spread').value), threshold=Number($('threshold').value);
   if(updateCloud) {
     const cloud=pointCloud(depth,rgba,spread);
     range=cloud.range;
@@ -111,8 +112,11 @@ $('example').addEventListener('click',async()=>{
   catch(error){status(error.message,true);}
 });
 $('cancel').addEventListener('click',()=>{++job;worker?.terminate();worker=null;controls(false);for(const el of document.querySelectorAll('.stages .active'))el.classList.remove('active');status('Canceled. Choose another image to start again.');$('result-heading').textContent=depth?'Depth ready · detection canceled':'Canceled';});
-for(const id of ['spread','threshold'])$(''+id).addEventListener('input',()=>{
-  $(`${id}-value`).value=Number($(id).value).toFixed(2);rebuild(id==='spread');
+for(const id of ['spread','threshold'])$(id).addEventListener('input',()=>{
+  const value=id==='spread'?spreadFromSlider($(id).value):Number($(id).value);
+  $(`${id}-value`).value=value.toFixed(2);
+  if(id==='spread')$('spread').setAttribute('aria-valuetext',`${value.toFixed(2)}×`);
+  rebuild(id==='spread');
 });
 $('outlines').addEventListener('change',()=>rebuild(false));
 $('reset').addEventListener('click',()=>viewer?.reset());
@@ -127,8 +131,29 @@ $('download').addEventListener('click',()=>{
   const url=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'}));
   const link=document.createElement('a');link.href=url;link.download='sphere-results.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 });
+const configDialog=$('config-dialog'), configControls=document.querySelector('.controls');
+const configHome=document.createComment('configuration controls');
+configControls.before(configHome);
+function showConfig() {
+  if(configDialog.open)return;
+  configDialog.prepend(configControls);
+  configDialog.showModal();
+}
+$('config-open').addEventListener('click',showConfig);
+$('config-close').addEventListener('click',()=>configDialog.close());
+configDialog.addEventListener('close',()=>configHome.after(configControls));
 try {
-  viewer=await createViewer($('scene'),$('enter'),$('viewer-status'));
+  viewer=await createViewer($('scene'),$('enter'),$('viewer-status'), {
+    getConfig: () => ({spread:spreadFromSlider($('spread').value), threshold:Number($('threshold').value), outlines:$('outlines').checked}),
+    setConfig: (key,value) => {
+      if(key==='outlines') { $('outlines').checked=value; rebuild(false); }
+      else {
+        $(key).value=key==='spread'?spreadToSlider(value):value;
+        $(key).dispatchEvent(new Event('input'));
+      }
+    },
+    showConfig,
+  });
   if(depth)rebuild();
 }
 catch(error){$('viewer-status').textContent=`3D view unavailable: ${error.message}`;}
