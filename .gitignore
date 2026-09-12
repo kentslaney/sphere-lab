@@ -1,3 +1,4 @@
+.DS_Store
 .local-https/
 __pycache__/
 renderer/target/
