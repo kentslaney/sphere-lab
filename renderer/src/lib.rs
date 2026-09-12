@@ -24,6 +24,11 @@ pub struct Renderer {
     shell_pipeline: Option<wgpu::RenderPipeline>,
     feedback_uniform: wgpu::Buffer,
     feedback_bind: wgpu::BindGroup,
+    menu: wgpu::Buffer,
+    menu_count: u32,
+    menu_layout: wgpu::BindGroupLayout,
+    menu_bind: Option<wgpu::BindGroup>,
+    menu_pipeline: Option<wgpu::RenderPipeline>,
     hud: wgpu::Buffer,
     hud_count: u32,
     hud_pipeline: Option<wgpu::RenderPipeline>,
@@ -161,6 +166,20 @@ impl Renderer {
                 resource: hud_uniform.as_entire_binding(),
             }],
         });
+        let menu = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("context menu quad"), size: 120,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let menu_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("menu texture layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
+            ],
+        });
         Ok(Self {
             device,
             queue,
@@ -182,6 +201,7 @@ impl Renderer {
             shell_pipeline: None,
             feedback_uniform,
             feedback_bind,
+            menu, menu_count: 0, menu_layout, menu_bind: None, menu_pipeline: None,
             hud,
             hud_count: 0,
             hud_pipeline: None,
@@ -346,6 +366,24 @@ impl Renderer {
                 self.line_pipeline = Some(pipeline);
             }
         }
+        let menu_shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("menu WGSL"), source: wgpu::ShaderSource::Wgsl(include_str!("menu.wgsl").into()),
+        });
+        let menu_pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("menu pipeline layout"), bind_group_layouts: &[Some(&self.layout), Some(&self.menu_layout)], immediate_size: 0,
+        });
+        self.menu_pipeline = Some(self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("context menu"), layout: Some(&menu_pipeline_layout),
+            vertex: wgpu::VertexState { module: &menu_shader, entry_point: Some("vs"), compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout { array_stride: 20, step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2] })] },
+            fragment: Some(wgpu::FragmentState { module: &menu_shader, entry_point: Some("fs"), compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState { format: color, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })] }),
+            primitive: Default::default(),
+            depth_stencil: Some(wgpu::DepthStencilState { format: wgpu::TextureFormat::Depth24Plus,
+                depth_write_enabled: Some(false), depth_compare: Some(wgpu::CompareFunction::Always), stencil: Default::default(), bias: Default::default() }),
+            multisample: Default::default(), multiview_mask: None, cache: None,
+        }));
         self.format = Some(color);
         Ok(())
     }
@@ -405,6 +443,37 @@ impl Renderer {
         if !vertices.is_empty() {
             self.queue.write_buffer(&self.feedback, 0, bytemuck::cast_slice(vertices));
         }
+        Ok(())
+    }
+
+    pub fn set_menu_texture(&mut self, pixels: &[u8], width: u32, height: u32) -> Result<(), JsValue> {
+        if width == 0 || height == 0 || width > 2048 || height > 2048 || pixels.len() != (width * height * 4) as usize {
+            return Err(JsValue::from_str("Invalid menu texture"));
+        }
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("JavaScript menu texture"), size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm, usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST, view_formats: &[],
+        });
+        self.queue.write_texture(wgpu::TexelCopyTextureInfo { texture: &texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            pixels, wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: Some(height) },
+            wgpu::Extent3d { width, height, depth_or_array_layers: 1 });
+        let view = texture.create_view(&Default::default());
+        let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor { mag_filter: wgpu::FilterMode::Linear, min_filter: wgpu::FilterMode::Linear, ..Default::default() });
+        self.menu_bind = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("context menu texture"), layout: &self.menu_layout,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&sampler) }],
+        }));
+        Ok(())
+    }
+
+    pub fn set_menu(&mut self, vertices: &[f32]) -> Result<(), JsValue> {
+        if (!vertices.is_empty() && vertices.len() != 30) || !vertices.iter().all(|v| v.is_finite()) {
+            return Err(JsValue::from_str("Invalid menu quad"));
+        }
+        self.menu_count = (vertices.len() / 5) as u32;
+        if !vertices.is_empty() { self.queue.write_buffer(&self.menu, 0, bytemuck::cast_slice(vertices)); }
         Ok(())
     }
 
@@ -577,6 +646,15 @@ impl Renderer {
                 pass.set_vertex_buffer(0, self.feedback.slice(..));
                 pass.set_pipeline(self.shell_pipeline.as_ref().unwrap());
                 pass.draw(0..self.feedback_count, 0..1);
+            }
+            if self.menu_count > 0 {
+                if let Some(bind) = &self.menu_bind {
+                    pass.set_pipeline(self.menu_pipeline.as_ref().unwrap());
+                    pass.set_bind_group(0, &self.feedback_bind, &[]);
+                    pass.set_bind_group(1, bind, &[]);
+                    pass.set_vertex_buffer(0, self.menu.slice(..));
+                    pass.draw(0..self.menu_count, 0..1);
+                }
             }
             if self.hud_count > 0 {
                 pass.set_bind_group(0, &self.hud_bind, &[]);

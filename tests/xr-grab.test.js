@@ -141,3 +141,58 @@ test('two-hand start origins synchronize when second hand joins to anchor scale 
   assert.deepEqual(markers[1].origin, [0.5, 0, -1]);
 });
 
+
+function menuHarness() {
+  const listeners = {}, g = new CloudGrab(), shown = [], selected = [];
+  const session = { visibilityState: 'visible', addEventListener: (n, f) => listeners[n] = f };
+  const source = { gripSpace: {} };
+  const update = attachCloudGrab(session, {}, g, () => {}, () => {}, m => shown.push(m && { ...m }), i => selected.push(i));
+  return { g, shown, selected,
+    event: (name, time) => listeners[name]({ inputSource: source, frame: { predictedDisplayTime: time } }),
+    frame: (time, y = 0, tracked = true) => update({ getPose: () => tracked ? { transform: { position: { x: 0, y, z: -1 } } } : null }, time),
+  };
+}
+
+test('quick quiet grab opens on Cancel; second grab motion selects without moving cloud', () => {
+  const h = menuHarness();
+  h.event('selectstart', 0); h.frame(0); h.event('selectend', 100);
+  h.event('selectstart', 200); h.frame(200);
+  assert.equal(h.shown.at(-1).selected, 1);
+  h.frame(220, 0.05); assert.equal(h.shown.at(-1).selected, 0);
+  assert.deepEqual(h.g.position, [0, 0, -2]);
+  h.frame(240, 0); assert.equal(h.shown.at(-1).selected, 1);
+  h.event('selectend', 250);
+  assert.deepEqual(h.selected, [1]); assert.equal(h.shown.at(-1), null);
+});
+
+test('immediate second release cancels even before a frame; test option also closes', () => {
+  const h = menuHarness();
+  h.event('selectstart', 0); h.frame(0); h.event('selectend', 100);
+  h.event('selectstart', 200); h.event('selectend', 201);
+  assert.deepEqual(h.selected, [1]);
+  h.event('selectstart', 300); h.frame(300); h.event('selectend', 350);
+  h.event('selectstart', 400); h.frame(400); h.frame(420, 0.05); h.event('selectend', 450);
+  assert.deepEqual(h.selected, [1, 0]); assert.equal(h.shown.at(-1), null);
+});
+
+test('long, moved, delayed and tracking-lost grabs do not arm a menu', () => {
+  for (const mode of ['long', 'moved', 'delayed', 'lost']) {
+    const h = menuHarness();
+    h.event('selectstart', 0); h.frame(0);
+    if (mode === 'moved') { h.frame(50, 0.1); h.frame(70, 0); }
+    if (mode === 'lost') h.frame(50, 0, false);
+    const end = mode === 'long' ? 300 : 100;
+    h.event('selectend', end);
+    const start = mode === 'delayed' ? 500 : end + 100;
+    h.event('selectstart', start); h.frame(start);
+    assert.ok(h.shown.every(m => m === null), mode);
+  }
+});
+
+test('tracking loss closes menu without selecting', () => {
+  const h = menuHarness();
+  h.event('selectstart', 0); h.frame(0); h.event('selectend', 100);
+  h.event('selectstart', 200); h.frame(200); h.frame(220, 0, false);
+  h.event('selectend', 230);
+  assert.equal(h.shown.at(-1), null); assert.deepEqual(h.selected, []);
+});

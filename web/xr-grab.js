@@ -50,12 +50,31 @@ export class CloudGrab {
   }
 }
 
-export function attachCloudGrab(session, space, grab, apply, feedback = () => {}) {
+export function attachCloudGrab(session, space, grab, apply, feedback = () => {}, menu = () => {}, select = () => {}) {
   const held = new Set();
   const origins = new Map();
   let lastHandCount = 0;
+  let candidate = null, pending = null, activeMenu = null;
+  const now = event => event.frame?.predictedDisplayTime ?? performance.now();
+  const closeMenu = (commit = false) => {
+    if (activeMenu && commit) select(activeMenu.selected);
+    activeMenu = null; menu(null);
+  };
   const hide = () => { origins.clear(); lastHandCount = 0; feedback([]); };
-  const start = event => held.add(event.inputSource);
+  const start = event => {
+    if (held.has(event.inputSource)) return;
+    const time = now(event);
+    if (!held.size && pending && time - pending.time <= 350 && time >= pending.time) {
+      activeMenu = { source: event.inputSource, origin: null, selected: 1 };
+      candidate = null;
+      grab.release();
+    } else {
+      candidate = held.size ? null : { source: event.inputSource, time, origin: null, moved: false };
+    }
+    pending = null;
+    held.add(event.inputSource);
+    if (held.size > 1) { candidate = null; closeMenu(); }
+  };
   const remove = source => {
     // Other transient inputs must not rebase an ongoing grab and discard motion.
     if (!held.delete(source)) return;
@@ -63,16 +82,24 @@ export function attachCloudGrab(session, space, grab, apply, feedback = () => {}
     grab.release();
     if (held.size === 0) hide();
   };
-  const end = event => remove(event.inputSource);
-  const changed = event => { for (const source of event.removed) remove(source); };
-  const clear = () => { held.clear(); grab.release(); hide(); };
+  const end = event => {
+    const source = event.inputSource, time = now(event);
+    if (activeMenu?.source === source) closeMenu(true);
+    else if (candidate?.source === source && candidate.origin && !candidate.moved && time - candidate.time <= 250 && held.size === 1) {
+      pending = { time };
+    }
+    if (candidate?.source === source) candidate = null;
+    remove(source);
+  };
+  const changed = event => { for (const source of event.removed) { if (held.has(source)) { candidate = null; pending = null; closeMenu(); } remove(source); } };
+  const clear = () => { candidate = null; pending = null; closeMenu(); held.clear(); grab.release(); hide(); };
   session.addEventListener('selectstart', start);
   session.addEventListener('selectend', end);
   session.addEventListener('inputsourceschange', changed);
   session.addEventListener('visibilitychange', clear);
   session.addEventListener('end', clear);
   return (frame, time = performance.now()) => {
-    if (session.visibilityState !== 'visible') { grab.release(); hide(); return; }
+    if (session.visibilityState !== 'visible') { clear(); return; }
     const hands = new Map();
     for (const source of held) {
       // Use gripSpace when available (tracked hands/controllers), fallback to targetRaySpace
@@ -85,10 +112,30 @@ export function attachCloudGrab(session, space, grab, apply, feedback = () => {}
     }
     if (hands.size === 0) {
       if (held.size > 0) {
+        candidate = null; pending = null; closeMenu();
         grab.release();
         hide();
       }
       return;
+    }
+    if (candidate) {
+      const p = hands.get(candidate.source);
+      if (!p) candidate = null;
+      else {
+        candidate.origin ??= [...p];
+        candidate.moved ||= Math.hypot(...p.map((v, i) => v - candidate.origin[i])) > 0.02;
+      }
+    }
+    if (activeMenu) {
+      const p = hands.get(activeMenu.source);
+      if (!p) { closeMenu(); grab.release(); }
+      else {
+        activeMenu.origin ??= [...p];
+        const dy = p[1] - activeMenu.origin[1];
+        // Small hysteresis keeps tracking noise from flickering between rows.
+        activeMenu.selected = dy > (activeMenu.selected === 1 ? 0.03 : 0.02) ? 0 : 1;
+        hide(); menu(activeMenu); return;
+      }
     }
     const activeEntries = [...hands].slice(0, 2);
     for (const [source, position] of activeEntries) {

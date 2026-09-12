@@ -1,3 +1,4 @@
+import { menuPixels, menuVertices, MENU_WIDTH, MENU_HEIGHT } from './xr-menu.js';
 import { grabFeedbackVertices, buildDebugSphereVertices } from './xr-feedback.js';
 import { CloudGrab, attachCloudGrab } from './xr-grab.js';
 
@@ -225,9 +226,17 @@ export async function createViewer(canvas, button, status) {
             applyGrab();
             renderer.set_hud(new Float32Array());
             let currentViewerPos = [0, 0, 0];
+            let menuSelection = -1;
             const updateGrab = attachCloudGrab(active, space, grab, applyGrab, markers => {
               const feedback = grabFeedbackVertices(markers, currentViewerPos);
               renderer.set_grab_feedback(feedback);
+            }, menu => {
+              if (!menu) { renderer.set_menu(new Float32Array()); return; }
+              if (menu.selected !== menuSelection) {
+                renderer.set_menu_texture(menuPixels(menu.selected), MENU_WIDTH, MENU_HEIGHT);
+                menuSelection = menu.selected;
+              }
+              renderer.set_menu(menuVertices(menu.origin, currentViewerPos));
             });
             function frame(time, xrFrame) {
               if (session !== active || stopped) return;
