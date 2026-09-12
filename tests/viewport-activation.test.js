@@ -13,7 +13,7 @@ function setup(fine = false, fullscreen = 'native') {
   let clears = 0, requests = 0, enabled = true, modal = false;
   canvas.parentElement = stage; canvas.ownerDocument = document; document.defaultView = window;
   document.body = new Surface(); document.querySelector = () => modal;
-  media.matches = fine; window.matchMedia = () => media;
+  media.matches = !fine; window.matchMedia = query => { assert.equal(query, '(pointer: coarse)'); return media; };
   if (fullscreen !== 'missing') stage.requestFullscreen = async () => {
     requests++;
     if (fullscreen === 'reject') throw Error('Unavailable');
@@ -54,7 +54,7 @@ test('fine pointers work immediately without fullscreen; modal, XR and device lo
   h.canvas.dispatchEvent(new Event('click')); assert.equal(h.requests(), 0);
   h.modal(true); assert.equal(h.accepts(), false); h.modal(false);
   h.enabled(false); assert.equal(h.accepts(), false); h.enabled(true);
-  h.media.matches = false; h.media.dispatchEvent(new Event('change'));
+  h.media.matches = true; h.media.dispatchEvent(new Event('change'));
   assert.equal(h.accepts(), false); assert.equal(h.canvas.style.touchAction, 'auto');
   assert.ok(h.clears() > 0);
 });

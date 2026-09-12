@@ -104,15 +104,28 @@ export function attachCloudGrab(session, space, grab, apply, feedback = () => {}
   return (frame, time = performance.now()) => {
     if (session.visibilityState !== 'visible') { clear(); return; }
     const hands = new Map();
-    for (const source of held) {
+    const sources = config?.isOpen ? new Set([...(session.inputSources ?? []), ...held]) : held;
+    for (const source of sources) {
       // Use gripSpace when available (tracked hands/controllers), fallback to targetRaySpace
       const targetSpace = source.gripSpace || source.targetRaySpace;
       const pose = targetSpace && frame.getPose(targetSpace, space);
       if (!pose) continue;
       const p = pose.transform.position;
       if (![p.x, p.y, p.z].every(Number.isFinite)) continue;
-      hands.set(source, [p.x, p.y, p.z]);
+      let position = [p.x, p.y, p.z];
+      if (config?.isOpen && !source.gripSpace && pose.transform.orientation) {
+        // Gaze/controller rays hover on the same upright plane as the menu.
+        const q = pose.transform.orientation;
+        const direction = rotate([q.x, q.y, q.z, q.w], [0, 0, -1]);
+        const normal = [-config.right[2], 0, config.right[0]];
+        const denominator = dot(direction, normal);
+        const distance = dot(config.origin.map((v, i) => v - position[i]), normal) / denominator;
+        if (Math.abs(denominator) < 1e-5 || distance < 0 || !Number.isFinite(distance)) continue;
+        position = position.map((v, i) => v + direction[i] * distance);
+      }
+      hands.set(source, position);
     }
+    if (config?.isOpen) { config.update(hands, held); grab.release(); hide(); return; }
     if (hands.size === 0) {
       if (held.size > 0) {
         config?.cancelGrab();
@@ -122,7 +135,6 @@ export function attachCloudGrab(session, space, grab, apply, feedback = () => {}
       }
       return;
     }
-    if (config?.isOpen) { config.update(hands); grab.release(); hide(); return; }
     if (candidate) {
       const p = hands.get(candidate.source);
       if (!p) candidate = null;

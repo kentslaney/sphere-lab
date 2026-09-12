@@ -1,8 +1,8 @@
 export const spreadFromSlider = value => 2 ** Number(value);
 export const spreadToSlider = value => Math.log2(Math.max(0.25, Math.min(4, value)));
 
-// VR config stays open between grabs. Vertical motion chooses a row; horizontal
-// motion edits its value. Releasing on Show detections toggles it; Done closes.
+// Config owns all XR input while open. Unpressed pointers hover over rows;
+// pressing locks that row until release, with only horizontal motion editing it.
 export class XRConfig {
   constructor(read, write) { this.read = read; this.write = write; this.close(); }
   open(origin, right) {
@@ -11,34 +11,36 @@ export class XRConfig {
   }
   close() { this.isOpen = false; this.anchor = null; }
   cancelGrab() { this.anchor = null; }
-  update(hands) {
-    if (hands.size !== 1) { this.cancelGrab(); return; }
-    const [source, p] = [...hands][0];
-    if (!this.anchor || this.anchor.source !== source) {
-      this.anchor = { source, p: [...p], selected: this.selected, editX: 0, values: this.read() };
-      return;
+  rowAt(p) {
+    const x = p.reduce((sum, v, i) => sum + (v - this.origin[i]) * this.right[i], 0);
+    const row = Math.round(3 - (p[1] - this.origin[1]) / 0.045);
+    return Math.abs(x) <= 0.12 && row >= 0 && row <= 3 ? Math.max(0, row) : -1;
+  }
+  update(pointers, held = new Set()) {
+    if (held.size > 1) { this.cancelGrab(); return; }
+    if (this.anchor && (!held.has(this.anchor.source) || !pointers.has(this.anchor.source))) this.cancelGrab();
+    if (!this.anchor) {
+      const entries = held.size ? [...pointers].filter(([source]) => held.has(source)) : [...pointers];
+      const hovered = entries.find(([, p]) => this.rowAt(p) >= 0);
+      this.selected = hovered ? this.rowAt(hovered[1]) : -1;
+      if (!hovered || !held.has(hovered[0])) return;
+      this.anchor = { source: hovered[0], p: [...hovered[1]], selected: this.selected, values: this.read() };
     }
-    const a = this.anchor;
-    const dy = p[1] - a.p[1];
-    const x = p.reduce((sum, v, i) => sum + (v - a.p[i]) * this.right[i], 0);
-    const row = Math.max(0, Math.min(3, a.selected - Math.round(dy / 0.05)));
-    if (row !== this.selected) {
-      this.selected = row; a.editX = x; a.values = this.read();
-    }
-    const dx = x - a.editX;
+    const a = this.anchor, p = pointers.get(a.source);
+    const dx = p.reduce((sum, v, i) => sum + (v - a.p[i]) * this.right[i], 0);
     const current = this.read();
-    if (row === 0) {
+    if (a.selected === 0) {
       const spread = 2 ** Math.max(-2, Math.min(2, Math.log2(a.values.spread) + dx * 16));
       if (Math.abs(Math.log2(spread / current.spread)) > 0.005) this.write('spread', spread);
-    } else if (row === 1) {
+    } else if (a.selected === 1) {
       const threshold = Math.round(Math.max(0, Math.min(1, a.values.threshold + dx * 4)) * 100) / 100;
       if (threshold !== current.threshold) this.write('threshold', threshold);
     }
   }
   end(source) {
     if (this.anchor?.source !== source) return;
-    if (this.selected === 2) this.write('outlines', !this.read().outlines);
-    if (this.selected === 3) this.close();
+    if (this.anchor.selected === 2) this.write('outlines', !this.read().outlines);
+    if (this.anchor.selected === 3) this.close();
     this.anchor = null;
   }
   items() {

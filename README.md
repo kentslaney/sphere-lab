@@ -44,7 +44,7 @@ Select **Choose an image** or **Try example photo**. The analysis uses a center
 crop at 518 × 392; the left preview shows exactly what is analyzed. Depth is shown
 as soon as ONNX completes, before the detector runs. Drag with a mouse to look
 around. Vertical scrolling moves along camera depth; horizontal trackpad
-scrolling moves along camera right. On devices without a fine pointer, tap the
+scrolling moves along camera right. On devices matching CSS `(pointer: coarse)`, tap the
 viewport to enter full screen before interacting; the initial tap leaves the
 camera in place. An **Exit full screen** button returns to the page. Browsers
 without native fullscreen use a full-window view. One touch pans; multiple
@@ -60,14 +60,16 @@ Release to leave it in place. Scaling is limited to 0.1–10×. A short pinch
 opens a context menu. Move the second pinch upward to highlight **config**, or
 back down to **Cancel**; release to select. Cancel starts selected, so an
 immediate release closes the menu. Config shows the same Depth spread,
-Minimum score, and Show detections values as the page. While holding a pinch,
-move up/down to choose a row and left/right to adjust spread or score. Release
+Minimum score, and Show detections values as the page. Scene dragging is disabled while Config is open. Hover over a row without
+pinching to highlight it, then pinch and move horizontally to adjust spread or
+score. The grabbed row stays selected even if the hand moves vertically. Release
 on Show detections to toggle it, or Done to close. Menu and config text and
 styling are drawn in JavaScript and uploaded as an RGBA texture sampled by WGSL.
 Missing hand tracking pauses the gesture and rebases on recovery.
 
-**Config** (or right-clicking the active viewport) also opens the controls outside
-VR, including in full screen. Depth spread uses a logarithmic 0.25–4× range,
+**Config** (or right-clicking the viewport) opens the controls outside VR only
+while the viewport is in full screen. The ordinary embedded viewport has no
+Config menu; its existing controls remain below it. Depth spread uses a logarithmic 0.25–4× range,
 with 1× at the midpoint. **Reset view** restores placement, rotation, and scale
 after exiting VR. **Export results** saves the
 raw candidates, filtered image detections, settings, and timings as JSON.

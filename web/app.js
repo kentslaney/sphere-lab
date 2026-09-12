@@ -135,13 +135,17 @@ const configDialog=$('config-dialog'), configControls=document.querySelector('.c
 const configHome=document.createComment('configuration controls');
 configControls.before(configHome);
 function showConfig() {
-  if(configDialog.open)return;
+  const stage=$('scene').parentElement;
+  if(configDialog.open || !(stage.classList.contains('viewport-fullscreen') || document.fullscreenElement===stage))return;
   configDialog.prepend(configControls);
   configDialog.showModal();
 }
 $('config-open').addEventListener('click',showConfig);
 $('config-close').addEventListener('click',()=>configDialog.close());
 configDialog.addEventListener('close',()=>configHome.after(configControls));
+document.addEventListener('fullscreenchange',()=>{
+  if(configDialog.open && document.fullscreenElement!==$('scene').parentElement)configDialog.close();
+});
 try {
   viewer=await createViewer($('scene'),$('enter'),$('viewer-status'), {
     getConfig: () => ({spread:spreadFromSlider($('spread').value), threshold:Number($('threshold').value), outlines:$('outlines').checked}),

@@ -266,14 +266,14 @@ export async function createViewer(canvas, button, status, options = {}) {
                 }
                 updateGrab(xrFrame, time);
                 if (config.isOpen) {
-                  const items = config.items(), hint = 'Move up/down to choose · Left/right to adjust';
+                  const items = config.items(), hint = 'Hover to choose · Grab and slide left/right';
                   const key = JSON.stringify([items, config.selected]);
                   const height = menuHeight(items, hint);
                   if (key !== configTexture) {
                     renderer.set_menu_texture(menuPixels(config.selected, items, hint), MENU_WIDTH, height);
                     configTexture = key;
                   }
-                  renderer.set_menu(menuVertices(config.origin, currentViewerPos, height, 3));
+                  renderer.set_menu(menuVertices(config.origin, currentViewerPos, height, 3, config.right));
                 } else if (configWasOpen) renderer.set_menu(new Float32Array());
                 configWasOpen = config.isOpen;
                 if (viewerPose) {
@@ -417,7 +417,8 @@ export async function createViewer(canvas, button, status, options = {}) {
       });
     }
     canvas.addEventListener('contextmenu', event => {
-      if (!acceptsInput()) return;
+      const stage = canvas.parentElement;
+      if (!acceptsInput() || !(stage.classList.contains('viewport-fullscreen') || document.fullscreenElement === stage)) return;
       event.preventDefault(); clearPointers(); options.showConfig?.();
     });
 

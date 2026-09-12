@@ -3,13 +3,13 @@
 export function attachViewportActivation(canvas, exitButton, clearPointers, enabled = () => true, report = console.error) {
   const stage = canvas.parentElement;
   const document = canvas.ownerDocument, window = document.defaultView;
-  const finePointer = window.matchMedia('(any-pointer: fine)');
+  const coarsePointer = window.matchMedia('(pointer: coarse)');
   let viewportActive = false, nativeFullscreen = false;
-  const acceptsInput = () => enabled() && !document.querySelector('dialog[open]') && (finePointer.matches || viewportActive);
+  const acceptsInput = () => enabled() && !document.querySelector('dialog[open]') && (!coarsePointer.matches || viewportActive);
   const updateInputMode = () => {
-    canvas.style.touchAction = finePointer.matches || viewportActive ? 'none' : 'auto';
-    stage.classList.toggle('needs-activation', !finePointer.matches && !viewportActive);
-    canvas.setAttribute('aria-label', !finePointer.matches && !viewportActive ? 'Tap to open point cloud full screen' : 'Interactive colored point cloud');
+    canvas.style.touchAction = !coarsePointer.matches || viewportActive ? 'none' : 'auto';
+    stage.classList.toggle('needs-activation', coarsePointer.matches && !viewportActive);
+    canvas.setAttribute('aria-label', coarsePointer.matches && !viewportActive ? 'Tap to open point cloud full screen' : 'Interactive colored point cloud');
   };
   const leaveViewport = () => {
     viewportActive = false; nativeFullscreen = false; clearPointers();
@@ -26,7 +26,7 @@ export function attachViewportActivation(canvas, exitButton, clearPointers, enab
     } catch (_) { /* Keep a viewport-filling fallback where native fullscreen is unavailable. */ }
   };
   canvas.addEventListener('click', () => {
-    if (!finePointer.matches && !viewportActive && enabled()) void activateViewport();
+    if (coarsePointer.matches && !viewportActive && enabled()) void activateViewport();
   });
   exitButton.addEventListener('click', async () => {
     if (document.fullscreenElement === stage) await document.exitFullscreen().catch(report);
@@ -42,7 +42,7 @@ export function attachViewportActivation(canvas, exitButton, clearPointers, enab
   });
   window.addEventListener('blur', clearPointers);
   window.addEventListener('resize', clearPointers);
-  finePointer.addEventListener('change', () => { clearPointers(); updateInputMode(); });
+  coarsePointer.addEventListener('change', () => { clearPointers(); updateInputMode(); });
   updateInputMode();
 
   return acceptsInput;
