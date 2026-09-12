@@ -4,3 +4,4 @@
 @media not all and (pointer:coarse){#scene{touch-action:none}}
 
 .vr-instructions{padding:0 22px 16px;margin:0}#config-open{display:none}.viewport-fullscreen #config-open,.viewer-stage:fullscreen #config-open{display:block}
+.viewer,.viewer *{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
