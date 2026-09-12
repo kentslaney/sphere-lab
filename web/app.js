@@ -1,3 +1,4 @@
+import {requestModelPersistence} from './model-cache.js';
 import {createViewer} from './viewer.js';
 import {WIDTH,HEIGHT,pointCloud,sphereLines,selectDetections,depthRange,cloudBounds} from './geometry.js';
 const $=id=>document.getElementById(id);
@@ -57,6 +58,7 @@ function paintDepth() {
   depthCanvas.putImageData(image,0,0);
 }
 function startWorker(){
+  void requestModelPersistence();
   if(worker) return;
   worker=new Worker(new URL('./inference-worker.js',import.meta.url),{type:'module'});
   worker.onmessage=({data})=>{

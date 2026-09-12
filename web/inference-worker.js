@@ -1,3 +1,4 @@
+import {loadCachedDepth} from './model-cache.js';
 import * as ort from './vendor/onnxruntime/ort.webgpu.min.mjs';
 import {WIDTH,HEIGHT,normalizeImage,resizeDepth} from './geometry.js';
 let depthSession, runtime, graphPointer;
@@ -28,7 +29,8 @@ async function fetchFile(url,id,label) {
 async function loadDepth(id) {
   if(depthSession) return;
   if(!depthModelBytes) {
-    depthModelBytes = await fetchFile(new URL('./models/depth-anything-v2-small.onnx',import.meta.url),id,'Depth Anything V2 Small');
+    const url = new URL('./models/depth-anything-v2-small.onnx',import.meta.url);
+    depthModelBytes = await loadCachedDepth(url, () => fetchFile(url,id,'Depth Anything V2 Small'));
   }
   if(navigator.gpu) {
     try {
