@@ -1,10 +1,10 @@
 import {spreadFromSlider, spreadToSlider} from './config.js';
 import {requestModelPersistence} from './model-cache.js';
 import {createViewer} from './viewer.js';
-import {WIDTH,HEIGHT,pointCloud,sphereLines,selectDetections,depthRange,cloudBounds} from './geometry.js';
+import {WIDTH,HEIGHT,pointCloud,sphereLines,depthLevelCurves,selectDetections,depthRange,cloudBounds} from './geometry.js';
 const $=id=>document.getElementById(id);
 let viewer=null, worker=null, job=0, rgba=null, depth=null, candidates=null, range=null, bounds=null, cloudVertices=null;
-let selected=[], sourceName='', depthMs=0, detectorMs=0, busy=false;
+let selected=[], sourceName='', depthMs=0, detectorMs=0, busy=false, debugMode=false;
 const photo=$('photo').getContext('2d'),depthCanvas=$('depth').getContext('2d');
 function status(message,error=false){$('status').textContent=message;$('status').classList.toggle('error',error);}
 function controls(running){busy=running;$('file').disabled=running;$('example').disabled=running;$('cancel').hidden=!running;}
@@ -25,6 +25,11 @@ function rebuild(updateCloud=true) {
   if(viewer&&$('outlines').checked&&selected.length) {
     const outlines=sphereLines(selected,depth,range,spread);
     for(let i=0;i<outlines.length;i++) allLines.push(outlines[i]);
+  }
+  if(viewer&&debugMode&&depth&&range) {
+    const numCurves=Number($('curves')?.value||5);
+    const curves=depthLevelCurves(depth,range,spread,numCurves);
+    for(let i=0;i<curves.length;i++) allLines.push(curves[i]);
   }
   if(viewer)viewer.setLines(new Float32Array(allLines));
   photo.putImageData(new ImageData(rgba,WIDTH,HEIGHT),0,0);
@@ -112,12 +117,16 @@ $('example').addEventListener('click',async()=>{
   catch(error){status(error.message,true);}
 });
 $('cancel').addEventListener('click',()=>{++job;worker?.terminate();worker=null;controls(false);for(const el of document.querySelectorAll('.stages .active'))el.classList.remove('active');status('Canceled. Choose another image to start again.');$('result-heading').textContent=depth?'Depth ready · detection canceled':'Canceled';});
-for(const id of ['spread','threshold'])$(id).addEventListener('input',()=>{
-  const value=id==='spread'?spreadFromSlider($(id).value):Number($(id).value);
-  $(`${id}-value`).value=value.toFixed(2);
-  if(id==='spread')$('spread').setAttribute('aria-valuetext',`${value.toFixed(2)}×`);
-  rebuild(id==='spread');
-});
+for(const id of ['spread','threshold','curves']){
+  const el=$(id);
+  if(!el)continue;
+  el.addEventListener('input',()=>{
+    const value=id==='spread'?spreadFromSlider(el.value):Number(el.value);
+    $(`${id}-value`).value=id==='curves'?String(value):value.toFixed(2);
+    if(id==='spread')el.setAttribute('aria-valuetext',`${value.toFixed(2)}×`);
+    rebuild(id==='spread');
+  });
+}
 $('outlines').addEventListener('change',()=>rebuild(false));
 $('reset').addEventListener('click',()=>viewer?.reset());
 $('download').addEventListener('click',()=>{
@@ -148,13 +157,28 @@ document.addEventListener('fullscreenchange',()=>{
 });
 try {
   viewer=await createViewer($('scene'),$('enter'),$('viewer-status'), {
-    getConfig: () => ({spread:spreadFromSlider($('spread').value), threshold:Number($('threshold').value), outlines:$('outlines').checked}),
+    getConfig: () => ({
+      spread: spreadFromSlider($('spread').value),
+      threshold: Number($('threshold').value),
+      curves: Number($('curves')?.value || 5),
+      outlines: $('outlines').checked
+    }),
     setConfig: (key,value) => {
       if(key==='outlines') { $('outlines').checked=value; rebuild(false); }
+      else if(key==='curves') {
+        const el=$('curves');
+        if(el) { el.value=value; $(`${key}-value`).value=String(value); }
+        rebuild(false);
+      }
       else {
         $(key).value=key==='spread'?spreadToSlider(value):value;
         $(key).dispatchEvent(new Event('input'));
       }
+    },
+    onDebug: () => {
+      debugMode = !debugMode;
+      rebuild(false);
+      status(debugMode ? `Debug: plotting ${$('curves')?.value || 5} level curves` : 'Debug curves hidden');
     },
     showConfig,
   });

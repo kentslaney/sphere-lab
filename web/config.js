@@ -7,14 +7,14 @@ export class XRConfig {
   constructor(read, write) { this.read = read; this.write = write; this.close(); }
   open(origin, right) {
     this.isOpen = true; this.origin = [...origin]; this.right = [...right];
-    this.selected = 3; this.anchor = null;
+    this.selected = 4; this.anchor = null;
   }
   close() { this.isOpen = false; this.anchor = null; }
   cancelGrab() { this.anchor = null; }
   rowAt(p) {
     const x = p.reduce((sum, v, i) => sum + (v - this.origin[i]) * this.right[i], 0);
-    const row = Math.round(3 - (p[1] - this.origin[1]) / 0.045);
-    return Math.abs(x) <= 0.12 && row >= 0 && row <= 3 ? Math.max(0, row) : -1;
+    const row = Math.round(4 - (p[1] - this.origin[1]) / 0.045);
+    return Math.abs(x) <= 0.12 && row >= 0 && row <= 4 ? Math.max(0, row) : -1;
   }
   update(pointers, held = new Set()) {
     if (held.size > 1) { this.cancelGrab(); return; }
@@ -35,16 +35,26 @@ export class XRConfig {
     } else if (a.selected === 1) {
       const threshold = Math.round(Math.max(0, Math.min(1, a.values.threshold + dx * 4)) * 100) / 100;
       if (threshold !== current.threshold) this.write('threshold', threshold);
+    } else if (a.selected === 2) {
+      const baseCurves = a.values.curves ?? 5;
+      const curves = Math.round(Math.max(1, Math.min(20, baseCurves + dx * 40)));
+      if (curves !== current.curves) this.write('curves', curves);
     }
   }
   end(source) {
     if (this.anchor?.source !== source) return;
-    if (this.anchor.selected === 2) this.write('outlines', !this.read().outlines);
-    if (this.anchor.selected === 3) this.close();
+    if (this.anchor.selected === 3) this.write('outlines', !this.read().outlines);
+    if (this.anchor.selected === 4) this.close();
     this.anchor = null;
   }
   items() {
     const values = this.read();
-    return [`Depth spread    ${values.spread.toFixed(2)}×`, `Minimum score    ${values.threshold.toFixed(2)}`, `Show detections    ${values.outlines ? 'On' : 'Off'}`, 'Done'];
+    return [
+      `Depth spread    ${values.spread.toFixed(2)}×`,
+      `Minimum score    ${values.threshold.toFixed(2)}`,
+      `Level curves    ${values.curves ?? 5}`,
+      `Show detections    ${values.outlines ? 'On' : 'Off'}`,
+      'Done'
+    ];
   }
 }

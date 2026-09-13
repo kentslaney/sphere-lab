@@ -58,12 +58,12 @@ Select **Enter VR** on a compatible headset. Pinch and hold with one hand to
 move the cloud, or both hands to scale and rotate around the grab points.
 Release to leave it in place. Scaling is limited to 0.1–10×. A short pinch
 (up to 250 ms, moving no more than 2 cm) followed within 350 ms by another pinch
-opens a context menu. Move the second pinch upward to highlight **config**, or
+opens a context menu. Move the second pinch upward to highlight **debug** or further up to **config**, or
 back down to **Cancel**; release to select. Cancel starts selected, so an
-immediate release closes the menu. Config shows the same Depth spread,
-Minimum score, and Show detections values as the page. Scene dragging is disabled while Config is open. Hover over a row without
-pinching to highlight it, then pinch and move horizontally to adjust spread or
-score. The grabbed row stays selected even if the hand moves vertically. Release
+immediate release closes the menu. Selecting **debug** toggles 3D depth level curves. Config shows the same Depth spread,
+Minimum score, Level curves, and Show detections values as the page. Scene dragging is disabled while Config is open. Hover over a row without
+pinching to highlight it, then pinch and move horizontally to adjust spread,
+score, or level curves. The grabbed row stays selected even if the hand moves vertically. Release
 on Show detections to toggle it, or Done to close. Menu and config text and
 styling are drawn in JavaScript and uploaded as an RGBA texture sampled by WGSL.
 Missing hand tracking pauses the gesture and rebases on recovery.

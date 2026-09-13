@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {sphereLines,normalizeImage,resizeDepth,selectDetections,pointCloud,pointAt,displayZ,WIDTH,HEIGHT,cloudBounds,computeViewportPinchScale} from '../web/geometry.js';
+import {sphereLines,depthLevelCurves,normalizeImage,resizeDepth,selectDetections,pointCloud,pointAt,displayZ,WIDTH,HEIGHT,cloudBounds,computeViewportPinchScale} from '../web/geometry.js';
 test('RGB normalization is NCHW and uses ImageNet values',()=>{
   const out=normalizeImage(new Uint8ClampedArray([255,0,128,255,0,255,0,255]),2,1);
   assert.equal(out.length,6);
@@ -97,4 +97,29 @@ test('maximum depth spread keeps near samples in front of the camera without col
   assert.ok(point.every(Number.isFinite));
   assert.ok(point[0] < 0); assert.ok(point[1] > 0);
   assert.ok(2 - point[2] > 0.05);
+});
+
+test('depthLevelCurves generates valid 3D isocontour line segments', () => {
+  assert.equal(depthLevelCurves(null, [1, 10]).length, 0);
+  assert.equal(depthLevelCurves(new Float32Array(WIDTH * HEIGHT), [10, 1]).length, 0);
+  assert.equal(depthLevelCurves(new Float32Array(WIDTH * HEIGHT), [1, 10], 1, 0).length, 0);
+
+  // Gradient depth field from 1 to 5
+  const depth = new Float32Array(WIDTH * HEIGHT);
+  for (let y = 0; y < HEIGHT; y++) {
+    for (let x = 0; x < WIDTH; x++) {
+      depth[y * WIDTH + x] = 1 + (x / WIDTH) * 4;
+    }
+  }
+
+  const curves3 = depthLevelCurves(depth, [1, 5], 1, 3, 4);
+  assert.ok(curves3.length > 0);
+  assert.equal(curves3.length % 12, 0);
+  assert.ok(curves3.every(Number.isFinite));
+
+  const curves7 = depthLevelCurves(depth, [1, 5], 1, 7, 4);
+  assert.ok(curves7.length > curves3.length);
+  assert.equal(curves7.length % 12, 0);
+  // Verify it stays safely within renderer limit
+  assert.ok(curves7.length <= 2560 * 12);
 });

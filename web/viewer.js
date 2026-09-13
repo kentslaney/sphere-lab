@@ -248,11 +248,14 @@ export async function createViewer(canvas, button, status, options = {}) {
               menuOrigin = [...menu.origin];
               renderer.set_menu(menuVertices(menu.origin, currentViewerPos));
             }, selected => {
-              if (selected !== 0) return;
-              const dx = currentViewerPos[0] - menuOrigin[0], dz = currentViewerPos[2] - menuOrigin[2];
-              const length = Math.hypot(dx, dz);
-              config.open(menuOrigin, length > 1e-5 ? [dz / length, 0, -dx / length] : [1, 0, 0]);
-              configTexture = ''; menuSelection = -1;
+              if (selected === 0) {
+                const dx = currentViewerPos[0] - menuOrigin[0], dz = currentViewerPos[2] - menuOrigin[2];
+                const length = Math.hypot(dx, dz);
+                config.open(menuOrigin, length > 1e-5 ? [dz / length, 0, -dx / length] : [1, 0, 0]);
+                configTexture = ''; menuSelection = -1;
+              } else if (selected === 1) {
+                options.onDebug?.();
+              }
             }, config);
             function frame(time, xrFrame) {
               if (session !== active || stopped) return;
@@ -273,7 +276,7 @@ export async function createViewer(canvas, button, status, options = {}) {
                     renderer.set_menu_texture(menuPixels(config.selected, items, hint), MENU_WIDTH, height);
                     configTexture = key;
                   }
-                  renderer.set_menu(menuVertices(config.origin, currentViewerPos, height, 3, config.right));
+                  renderer.set_menu(menuVertices(config.origin, currentViewerPos, height, 4, config.right));
                 } else if (configWasOpen) renderer.set_menu(new Float32Array());
                 configWasOpen = config.isOpen;
                 if (viewerPose) {
@@ -461,6 +464,7 @@ export async function createViewer(canvas, button, status, options = {}) {
         renderer.set_grab_feedback(new Float32Array());
       },
       getCamera: getCameraState,
+      triggerDebug: () => options.onDebug?.(),
       onPose: cb => {
         onPoseCallbacks.push(cb);
         cb(getCameraState());

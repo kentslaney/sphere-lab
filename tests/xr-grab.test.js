@@ -157,22 +157,26 @@ test('quick quiet grab opens on Cancel; second grab motion selects without movin
   const h = menuHarness();
   h.event('selectstart', 0); h.frame(0); h.event('selectend', 100);
   h.event('selectstart', 200); h.frame(200);
-  assert.equal(h.shown.at(-1).selected, 1);
-  h.frame(220, 0.05); assert.equal(h.shown.at(-1).selected, 0);
+  assert.equal(h.shown.at(-1).selected, 2);
+  h.frame(220, 0.05); assert.equal(h.shown.at(-1).selected, 1);
+  h.frame(230, 0.09); assert.equal(h.shown.at(-1).selected, 0);
   assert.deepEqual(h.g.position, [0, 0, -2]);
-  h.frame(240, 0); assert.equal(h.shown.at(-1).selected, 1);
+  h.frame(240, 0); assert.equal(h.shown.at(-1).selected, 2);
   h.event('selectend', 250);
-  assert.deepEqual(h.selected, [1]); assert.equal(h.shown.at(-1), null);
+  assert.deepEqual(h.selected, [2]); assert.equal(h.shown.at(-1), null);
 });
 
-test('immediate second release cancels even before a frame; config selection also closes the context menu', () => {
+test('immediate second release cancels even before a frame; config and debug selection also close context menu', () => {
   const h = menuHarness();
   h.event('selectstart', 0); h.frame(0); h.event('selectend', 100);
   h.event('selectstart', 200); h.event('selectend', 201);
-  assert.deepEqual(h.selected, [1]);
+  assert.deepEqual(h.selected, [2]);
   h.event('selectstart', 300); h.frame(300); h.event('selectend', 350);
   h.event('selectstart', 400); h.frame(400); h.frame(420, 0.05); h.event('selectend', 450);
-  assert.deepEqual(h.selected, [1, 0]); assert.equal(h.shown.at(-1), null);
+  assert.deepEqual(h.selected, [2, 1]); assert.equal(h.shown.at(-1), null);
+  h.event('selectstart', 500); h.frame(500); h.event('selectend', 550);
+  h.event('selectstart', 600); h.frame(600); h.frame(620, 0.09); h.event('selectend', 650);
+  assert.deepEqual(h.selected, [2, 1, 0]); assert.equal(h.shown.at(-1), null);
 });
 
 test('long, moved, delayed and tracking-lost grabs do not arm a menu', () => {

@@ -25,7 +25,7 @@
     <section class="workspace">
       <div class="viewer panel">
         <div class="viewer-heading"><div><div class="eyebrow">03 / SPATIAL VIEW</div><h2>Point cloud</h2></div><div class="actions"><button id="reset">Reset view</button><button id="enter" class="primary" disabled>Enter VR</button></div></div>
-        <p class="small muted vr-instructions">In VR: pinch and hold with one hand to grab and move. Pinch with both hands to scale and turn; each pinch stays anchored to its grab point. Release to leave the cloud in place. A quick double pinch opens config; move up to select it and release.</p>
+        <p class="small muted vr-instructions">In VR: pinch and hold with one hand to grab and move. Pinch with both hands to scale and turn; each pinch stays anchored to its grab point. Release to leave the cloud in place. A quick double pinch opens the context menu; move up to highlight debug or config and release.</p>
         <div class="viewer-stage">
           <div class="viewport-actions"><button id="config-open">Config</button><button id="viewport-exit" hidden>Exit full screen</button></div>
           <dialog id="config-dialog" aria-label="Configuration"><button id="config-close">Done</button></dialog>
@@ -36,6 +36,7 @@
       <div class="controls panel">
         <label>Depth spread <input id="spread" type="range" min="-2" max="2" step="0.01" value="0" aria-valuetext="1.00×"><output id="spread-value">1.00</output></label>
         <label>Minimum score <input id="threshold" type="range" min="0" max="1" step="0.01" value="0.1"><output id="threshold-value">0.10</output></label>
+        <label>Level curves <input id="curves" type="range" min="1" max="20" step="1" value="5"><output id="curves-value">5</output></label>
         <label class="toggle"><input id="outlines" type="checkbox" checked> Show detections</label>
       </div>
       <section class="panel results"><div class="results-heading"><div><div class="eyebrow">04 / RESULTS</div><h2 id="result-heading">Waiting for a photo</h2></div><button id="download" disabled>Export results</button></div>

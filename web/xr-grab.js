@@ -67,7 +67,7 @@ export function attachCloudGrab(session, space, grab, apply, feedback = () => {}
     const time = now(event);
     if (config?.isOpen) { held.add(event.inputSource); candidate = null; pending = null; return; }
     if (!held.size && pending && time - pending.time <= 350 && time >= pending.time) {
-      activeMenu = { source: event.inputSource, origin: null, selected: 1 };
+      activeMenu = { source: event.inputSource, origin: null, selected: 2 };
       candidate = null;
       grab.release();
     } else {
@@ -150,7 +150,17 @@ export function attachCloudGrab(session, space, grab, apply, feedback = () => {}
         activeMenu.origin ??= [...p];
         const dy = p[1] - activeMenu.origin[1];
         // Small hysteresis keeps tracking noise from flickering between rows.
-        activeMenu.selected = dy > (activeMenu.selected === 1 ? 0.03 : 0.02) ? 0 : 1;
+        // Row 2 is Cancel (dy ~ 0), Row 1 is debug (dy ~ 0.045), Row 0 is config (dy ~ 0.09)
+        if (activeMenu.selected === 2) {
+          if (dy > 0.07) activeMenu.selected = 0;
+          else if (dy > 0.025) activeMenu.selected = 1;
+        } else if (activeMenu.selected === 1) {
+          if (dy < 0.015) activeMenu.selected = 2;
+          else if (dy > 0.07) activeMenu.selected = 0;
+        } else if (activeMenu.selected === 0) {
+          if (dy < 0.015) activeMenu.selected = 2;
+          else if (dy < 0.06) activeMenu.selected = 1;
+        }
         hide(); menu(activeMenu); return;
       }
     }
