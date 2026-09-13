@@ -413,7 +413,7 @@ impl Renderer {
     }
     pub fn set_lines(&mut self, lines: &[f32]) -> Result<(), JsValue> {
         if lines.len() % 12 != 0
-            || lines.len() > (8 * 3 * 64 + 1024) * 12
+            || lines.len() > (8 * 3 * 64 + 65536) * 12
             || !lines.iter().all(|x| x.is_finite())
         {
             return Err(JsValue::from_str("Invalid annotation vertices"));

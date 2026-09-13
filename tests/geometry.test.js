@@ -122,4 +122,10 @@ test('depthLevelCurves generates valid 3D isocontour line segments', () => {
   assert.equal(curves7.length % 12, 0);
   // Verify it stays safely within renderer limit
   assert.ok(curves7.length <= 2560 * 12);
+
+  // Default 100 curves
+  const curves100 = depthLevelCurves(depth, [1, 5]);
+  assert.ok(curves100.length > curves7.length);
+  assert.equal(curves100.length % 12, 0);
+  assert.ok(curves100.length <= 65536 * 12);
 });

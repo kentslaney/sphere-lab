@@ -27,7 +27,7 @@ function rebuild(updateCloud=true) {
     for(let i=0;i<outlines.length;i++) allLines.push(outlines[i]);
   }
   if(viewer&&debugMode&&depth&&range) {
-    const numCurves=Number($('curves')?.value||5);
+    const numCurves=Number($('curves')?.value||100);
     const curves=depthLevelCurves(depth,range,spread,numCurves);
     for(let i=0;i<curves.length;i++) allLines.push(curves[i]);
   }
@@ -160,7 +160,7 @@ try {
     getConfig: () => ({
       spread: spreadFromSlider($('spread').value),
       threshold: Number($('threshold').value),
-      curves: Number($('curves')?.value || 5),
+      curves: Number($('curves')?.value || 100),
       outlines: $('outlines').checked
     }),
     setConfig: (key,value) => {
@@ -178,7 +178,7 @@ try {
     onDebug: () => {
       debugMode = !debugMode;
       rebuild(false);
-      status(debugMode ? `Debug: plotting ${$('curves')?.value || 5} level curves` : 'Debug curves hidden');
+      status(debugMode ? `Debug: plotting ${$('curves')?.value || 100} level curves` : 'Debug curves hidden');
     },
     showConfig,
   });

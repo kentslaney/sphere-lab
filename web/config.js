@@ -36,8 +36,8 @@ export class XRConfig {
       const threshold = Math.round(Math.max(0, Math.min(1, a.values.threshold + dx * 4)) * 100) / 100;
       if (threshold !== current.threshold) this.write('threshold', threshold);
     } else if (a.selected === 2) {
-      const baseCurves = a.values.curves ?? 5;
-      const curves = Math.round(Math.max(1, Math.min(20, baseCurves + dx * 40)));
+      const baseCurves = a.values.curves ?? 100;
+      const curves = Math.round(Math.max(1, Math.min(200, baseCurves + dx * 40)));
       if (curves !== current.curves) this.write('curves', curves);
     }
   }
@@ -52,7 +52,7 @@ export class XRConfig {
     return [
       `Depth spread    ${values.spread.toFixed(2)}×`,
       `Minimum score    ${values.threshold.toFixed(2)}`,
-      `Level curves    ${values.curves ?? 5}`,
+      `Level curves    ${values.curves ?? 100}`,
       `Show detections    ${values.outlines ? 'On' : 'Off'}`,
       'Done'
     ];

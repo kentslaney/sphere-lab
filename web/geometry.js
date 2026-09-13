@@ -101,27 +101,34 @@ export function sphereLines(detections,depth,range,spread=1) {
   return new Float32Array(out);
 }
 
-export function depthLevelCurves(depth, range, spread = 1, numCurves = 5, step = 4) {
+export function depthLevelCurves(depth, range, spread = 1, numCurves = 100, step = 4) {
   if (!depth || depth.length !== WIDTH * HEIGHT || !range || numCurves <= 0) return new Float32Array();
   const [lo, hi] = range;
   if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return new Float32Array();
   const out = [];
   const s = Math.max(1, Math.floor(step));
   const color = [0.2, 0.85, 0.95];
+  const delta = (hi - lo) / (numCurves + 1);
 
-  for (let k = 1; k <= numCurves; k++) {
-    const level = lo + (k / (numCurves + 1)) * (hi - lo);
+  for (let y = 0; y + s < HEIGHT; y += s) {
+    for (let x = 0; x + s < WIDTH; x += s) {
+      const i0 = y * WIDTH + x;
+      const i1 = y * WIDTH + (x + s);
+      const i2 = (y + s) * WIDTH + (x + s);
+      const i3 = (y + s) * WIDTH + x;
 
-    for (let y = 0; y + s < HEIGHT; y += s) {
-      for (let x = 0; x + s < WIDTH; x += s) {
-        const i0 = y * WIDTH + x;
-        const i1 = y * WIDTH + (x + s);
-        const i2 = (y + s) * WIDTH + (x + s);
-        const i3 = (y + s) * WIDTH + x;
+      const v0 = depth[i0], v1 = depth[i1], v2 = depth[i2], v3 = depth[i3];
+      if (!Number.isFinite(v0) || !Number.isFinite(v1) || !Number.isFinite(v2) || !Number.isFinite(v3)) continue;
+      if (v0 <= 0 || v1 <= 0 || v2 <= 0 || v3 <= 0) continue;
 
-        const v0 = depth[i0], v1 = depth[i1], v2 = depth[i2], v3 = depth[i3];
-        if (!Number.isFinite(v0) || !Number.isFinite(v1) || !Number.isFinite(v2) || !Number.isFinite(v3)) continue;
-        if (v0 <= 0 || v1 <= 0 || v2 <= 0 || v3 <= 0) continue;
+      const minV = Math.min(v0, v1, v2, v3);
+      const maxV = Math.max(v0, v1, v2, v3);
+      const k0 = Math.max(1, Math.ceil((minV - lo) / delta));
+      const k1 = Math.min(numCurves, Math.floor((maxV - lo) / delta));
+      if (k0 > k1) continue;
+
+      for (let k = k0; k <= k1; k++) {
+        const level = lo + k * delta;
 
         let mask = 0;
         if (v0 >= level) mask |= 1;
