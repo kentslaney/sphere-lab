@@ -216,6 +216,8 @@ export async function createViewer(canvas, button, status, options = {}) {
             config.close(); renderer.set_menu(new Float32Array());
             renderer.set_hud(new Float32Array());
             renderer.set_grab_feedback(new Float32Array());
+            renderer.clear_grab_level_curve?.();
+            options.onGrabMove?.([]);
             if (!stopped) {
               status.textContent = 'Ready to enter VR again.';
               previewFrame = requestAnimationFrame(preview);
@@ -261,16 +263,6 @@ export async function createViewer(canvas, button, status, options = {}) {
 
               const feedback = grabFeedbackVertices(markers, currentViewerPos, closestPointWorld, isSingleDebugGrab);
               renderer.set_grab_feedback(feedback);
-              if (options.onGrabMove) {
-                const modelGrabs = markers.map(m => {
-                  const dx = (m.position[0] - grab.position[0]) / grab.scale;
-                  const dy = (m.position[1] - grab.position[1]) / grab.scale;
-                  const dz = (m.position[2] - grab.position[2]) / grab.scale;
-                  const qInv = [-grab.rotation[0], -grab.rotation[1], -grab.rotation[2], grab.rotation[3]];
-                  return rotate(qInv, [dx, dy, dz]);
-                });
-                options.onGrabMove(modelGrabs);
-              }
             }, menu => {
               if (!menu) { renderer.set_menu(new Float32Array()); return; }
               if (menu.selected !== menuSelection) {
@@ -504,6 +496,9 @@ export async function createViewer(canvas, button, status, options = {}) {
       setDebug: enabled => { debugMode = Boolean(enabled); },
       setDepthMap: (depth, minDepth, maxDepth, spread) => {
         renderer.set_depth_map(depth, minDepth, maxDepth, spread);
+      },
+      setCurvature: (grad, rotated) => {
+        renderer.set_curvature?.(grad, rotated);
       },
       setSpread: spread => {
         renderer.set_spread(spread);

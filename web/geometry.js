@@ -341,19 +341,115 @@ export function smallSphereLines(center, radius = 0.02, color = [1, 0.85, 0.2], 
   return new Float32Array(out);
 }
 
-export function grabLevelCurveLines(depth, range, spread = 1, grabPositions = []) {
-  if (!depth || !range || !grabPositions || !grabPositions.length) return new Float32Array();
+export function curvatureVectorLines(closestPoint, grad, rotated, arrowLength = 0.08) {
+  if (!closestPoint || closestPoint.length < 3) return new Float32Array();
+  if (!grad || grad.length !== WIDTH * HEIGHT * 2) return new Float32Array();
+  if (!rotated || rotated.length !== WIDTH * HEIGHT * 4) return new Float32Array();
+
+  const [cx, cy, cz] = closestPoint;
+  const z = 2 - cz;
+  if (z <= 0.05) return new Float32Array();
+  const focal = WIDTH / (2 * Math.tan(Math.PI / 6));
+  const x = cx * focal / z + (WIDTH - 1) / 2;
+  const y = (HEIGHT - 1) / 2 - cy * focal / z;
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) {
+    return new Float32Array();
+  }
+
+  const x0 = Math.min(WIDTH - 1, Math.max(0, Math.floor(x)));
+  const x1 = Math.min(WIDTH - 1, x0 + 1);
+  const fx = x - x0;
+
+  const y0 = Math.min(HEIGHT - 1, Math.max(0, Math.floor(y)));
+  const y1 = Math.min(HEIGHT - 1, y0 + 1);
+  const fy = y - y0;
+
+  const sample2D = (data, stride, offset) => {
+    const i00 = (y0 * WIDTH + x0) * stride + offset;
+    const i01 = (y0 * WIDTH + x1) * stride + offset;
+    const i10 = (y1 * WIDTH + x0) * stride + offset;
+    const i11 = (y1 * WIDTH + x1) * stride + offset;
+    return (data[i00] * (1 - fx) + data[i01] * fx) * (1 - fy)
+         + (data[i10] * (1 - fx) + data[i11] * fx) * fy;
+  };
+
+  const gy = sample2D(grad, 2, 0);
+  const gx = sample2D(grad, 2, 1);
+  const gNorm = Math.hypot(gx, gy);
+  if (gNorm <= 1e-12) return new Float32Array();
+
+  const b0_x = gx / gNorm;
+  const b0_y = gy / gNorm;
+
+  const da2 = sample2D(rotated, 4, 0);
+  const db2 = sample2D(rotated, 4, 3);
+  const diagNorm = Math.hypot(da2, db2);
+
   const out = [];
-  for (const grabPos of grabPositions) {
-    if (!grabPos || grabPos.length < 3) continue;
-    const level = depthFromZ(grabPos[2], range, spread);
-    if (!Number.isFinite(level)) continue;
-    const { lines, segments } = depthLevelCurveAt(depth, range, spread, level, 2);
-    for (let i = 0; i < lines.length; i++) out.push(lines[i]);
-    const closest = closestPointOnSegments(segments, grabPos);
-    if (closest) {
-      const sphere = smallSphereLines(closest, 0.02, [1, 0.85, 0.2]);
-      for (let i = 0; i < sphere.length; i++) out.push(sphere[i]);
+  const appendArrow = (dir, len, color) => {
+    const [dx, dy, dz] = dir;
+    const tip = [cx + len * dx, cy + len * dy, cz + len * dz];
+    out.push(
+      cx, cy, cz, ...color,
+      tip[0], tip[1], tip[2], ...color
+    );
+    const barbLen = len * 0.25;
+    const cosA = 0.8660254; // cos(30 deg)
+    const sinA = 0.5;       // sin(30 deg)
+    const perp = [-dy, dx, 0];
+
+    const b1 = [
+      tip[0] - barbLen * (dx * cosA - perp[0] * sinA),
+      tip[1] - barbLen * (dy * cosA - perp[1] * sinA),
+      tip[2] - barbLen * (dz * cosA - perp[2] * sinA),
+    ];
+    const b2 = [
+      tip[0] - barbLen * (dx * cosA + perp[0] * sinA),
+      tip[1] - barbLen * (dy * cosA + perp[1] * sinA),
+      tip[2] - barbLen * (dz * cosA + perp[2] * sinA),
+    ];
+    out.push(
+      tip[0], tip[1], tip[2], ...color,
+      b1[0], b1[1], b1[2], ...color,
+      tip[0], tip[1], tip[2], ...color,
+      b2[0], b2[1], b2[2], ...color
+    );
+  };
+
+  // Vector 1: Normalized 2D direction of gradient in 3D: [b0_x, -b0_y, 0]
+  appendArrow([b0_x, -b0_y, 0], arrowLength, [0.2, 1.0, 0.3]);
+
+  // Vector 2: Diagonal terms in rotated as a single normalized vector with respect to rotated gradient
+  if (diagNorm > 1e-12) {
+    const w0 = da2 / diagNorm;
+    const w1 = db2 / diagNorm;
+    const v2_x = w0 * b0_x + w1 * b0_y;
+    const v2_y = w0 * b0_y - w1 * b0_x;
+    appendArrow([v2_x, -v2_y, 0], arrowLength, [1.0, 0.25, 0.75]);
+  }
+
+  return new Float32Array(out);
+}
+
+export function grabLevelCurveLines(depth, range, spread = 1, grabPositions = [], grad = null, rotated = null) {
+  if (!depth || !range || !grabPositions || grabPositions.length !== 1) return new Float32Array();
+  const grabPos = grabPositions[0];
+  if (!grabPos || grabPos.length < 3) return new Float32Array();
+  const level = depthFromZ(grabPos[2], range, spread);
+  if (!Number.isFinite(level)) return new Float32Array();
+
+  const { lines, segments } = depthLevelCurveAt(depth, range, spread, level, 2);
+  const out = [];
+  for (let i = 0; i < lines.length; i++) out.push(lines[i]);
+
+  const closest = closestPointOnSegments(segments, grabPos);
+  if (closest) {
+    const sphere = smallSphereLines(closest, 0.02, [1, 0.85, 0.2]);
+    for (let i = 0; i < sphere.length; i++) out.push(sphere[i]);
+
+    if (grad && rotated) {
+      const vectorLines = curvatureVectorLines(closest, grad, rotated, 0.08);
+      for (let i = 0; i < vectorLines.length; i++) out.push(vectorLines[i]);
     }
   }
   return new Float32Array(out);

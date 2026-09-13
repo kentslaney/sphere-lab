@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {sphereLines,depthLevelCurves,depthFromZ,depthLevelCurveAt,closestPointOnSegments,smallSphereLines,grabLevelCurveLines,normalizeImage,resizeDepth,selectDetections,pointCloud,pointAt,displayZ,WIDTH,HEIGHT,cloudBounds,computeViewportPinchScale} from '../web/geometry.js';
+import {sphereLines,depthLevelCurves,depthFromZ,depthLevelCurveAt,closestPointOnSegments,smallSphereLines,grabLevelCurveLines,curvatureVectorLines,normalizeImage,resizeDepth,selectDetections,pointCloud,pointAt,displayZ,WIDTH,HEIGHT,cloudBounds,computeViewportPinchScale} from '../web/geometry.js';
 test('RGB normalization is NCHW and uses ImageNet values',()=>{
   const out=normalizeImage(new Uint8ClampedArray([255,0,128,255,0,255,0,255]),2,1);
   assert.equal(out.length,6);
@@ -210,4 +210,72 @@ test('grabLevelCurveLines draws level curve and marks closest point with small s
   // Empty grabs returns empty Float32Array
   assert.equal(grabLevelCurveLines(depth, range, 1, []).length, 0);
   assert.equal(grabLevelCurveLines(null, range, 1, [grabPos]).length, 0);
+
+  // Two grabs (double grab) must return empty Float32Array (no level curves!)
+  const grabPos2 = [0.1, 0.1, midZ];
+  assert.equal(grabLevelCurveLines(depth, range, 1, [grabPos, grabPos2]).length, 0);
 });
+
+test('curvatureVectorLines plots normalized gradient direction and rotated diagonal vector', () => {
+  const grad = new Float32Array(WIDTH * HEIGHT * 2);
+  const rotated = new Float32Array(WIDTH * HEIGHT * 4);
+
+  // Set uniform gradient pointing right: gy = 0, gx = 2.0 -> normalized is [gx: 1, gy: 0]
+  // In 3D: [gx: 1, -gy: 0, 0] = [1, 0, 0]
+  // Set rotated diagonals: da2 = 3.0, db2 = 4.0 -> diagNorm = 5.0 -> w0 = 0.6, w1 = 0.8
+  // b0 = [gx: 1, gy: 0], b1 = [gy: 0, -gx: -1] -> [0, 1] in image
+  // v2_x = w0 * 1 + w1 * 0 = 0.6
+  // v2_y = w0 * 0 - w1 * 1 = -0.8
+  // In 3D: [v2_x, -v2_y, 0] = [0.6, 0.8, 0]
+  for (let i = 0; i < WIDTH * HEIGHT; i++) {
+    grad[i * 2] = 0; // gy
+    grad[i * 2 + 1] = 2.0; // gx
+    rotated[i * 4] = 3.0; // da2
+    rotated[i * 4 + 1] = 0.0;
+    rotated[i * 4 + 2] = 0.0;
+    rotated[i * 4 + 3] = 4.0; // db2
+  }
+
+  const range = [1, 4];
+  const closestPoint = [0, 0, 2 - displayZ(2.5, range, 1)];
+  const lines = curvatureVectorLines(closestPoint, grad, rotated, 0.08);
+
+  assert.ok(lines.length > 0);
+  // Two arrows: each has 1 stem + 2 barbs = 3 lines = 6 vertices * 6 floats = 36 floats per arrow.
+  // 2 arrows = 72 floats.
+  assert.equal(lines.length, 72);
+  assert.ok(lines.every(Number.isFinite));
+
+  // Verify first arrow color (emerald green: 0.2, 1.0, 0.3)
+  assert.ok(Math.abs(lines[3] - 0.2) < 1e-4);
+  assert.ok(Math.abs(lines[4] - 1.0) < 1e-4);
+  assert.ok(Math.abs(lines[5] - 0.3) < 1e-4);
+
+  // Tip of gradient arrow: start + len * [1, 0, 0]
+  assert.ok(Math.abs(lines[6] - (closestPoint[0] + 0.08)) < 1e-4);
+  assert.ok(Math.abs(lines[7] - closestPoint[1]) < 1e-4);
+  assert.ok(Math.abs(lines[8] - closestPoint[2]) < 1e-4);
+
+  // Verify second arrow color (magenta: 1.0, 0.25, 0.75)
+  assert.ok(Math.abs(lines[39] - 1.0) < 1e-4);
+  assert.ok(Math.abs(lines[40] - 0.25) < 1e-4);
+  assert.ok(Math.abs(lines[41] - 0.75) < 1e-4);
+
+  // Tip of rotated diagonal arrow: start + len * [0.6, 0.8, 0]
+  assert.ok(Math.abs(lines[42] - (closestPoint[0] + 0.08 * 0.6)) < 1e-4);
+  assert.ok(Math.abs(lines[43] - (closestPoint[1] + 0.08 * 0.8)) < 1e-4);
+  assert.ok(Math.abs(lines[44] - closestPoint[2]) < 1e-4);
+
+  // grabLevelCurveLines with curvature data includes the 72 vector floats
+  const depthField = new Float32Array(WIDTH * HEIGHT);
+  for (let y = 0; y < HEIGHT; y++) {
+    for (let x = 0; x < WIDTH; x++) {
+      depthField[y * WIDTH + x] = 1 + (x / WIDTH) * 3;
+    }
+  }
+  const baseLines = grabLevelCurveLines(depthField, range, 1, [closestPoint]);
+  assert.ok(baseLines.length > 0);
+  const withCurvature = grabLevelCurveLines(depthField, range, 1, [closestPoint], grad, rotated);
+  assert.equal(withCurvature.length, baseLines.length + 72);
+});
+

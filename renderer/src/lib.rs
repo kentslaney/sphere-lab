@@ -43,6 +43,8 @@ pub struct Renderer {
     depth_data: Option<Vec<f32>>,
     depth_range: (f32, f32),
     depth_spread: f32,
+    grad_data: Option<Vec<f32>>,
+    rotated_data: Option<Vec<f32>>,
     base_lines: Vec<f32>,
 }
 
@@ -202,6 +204,110 @@ fn closest_point_on_segments(segments: &[[f32; 6]], point: [f32; 3]) -> Option<[
         }
     }
     best_pt
+}
+
+fn append_arrow(
+    out: &mut Vec<f32>,
+    start: [f32; 3],
+    dir: [f32; 3],
+    len: f32,
+    color: [f32; 3],
+) {
+    let [sx, sy, sz] = start;
+    let [dx, dy, dz] = dir;
+    let tip = [sx + len * dx, sy + len * dy, sz + len * dz];
+
+    // Stem: start -> tip
+    out.extend_from_slice(&[
+        sx, sy, sz, color[0], color[1], color[2],
+        tip[0], tip[1], tip[2], color[0], color[1], color[2],
+    ]);
+
+    // Barbs at tip
+    let barb_len = len * 0.25;
+    let cos_a = 0.8660254f32; // cos(30 deg)
+    let sin_a = 0.5f32;       // sin(30 deg)
+    let perp = [-dy, dx, 0.0];
+
+    let b1_x = tip[0] - barb_len * (dx * cos_a - perp[0] * sin_a);
+    let b1_y = tip[1] - barb_len * (dy * cos_a - perp[1] * sin_a);
+    let b1_z = tip[2] - barb_len * (dz * cos_a - perp[2] * sin_a);
+
+    let b2_x = tip[0] - barb_len * (dx * cos_a + perp[0] * sin_a);
+    let b2_y = tip[1] - barb_len * (dy * cos_a + perp[1] * sin_a);
+    let b2_z = tip[2] - barb_len * (dz * cos_a + perp[2] * sin_a);
+
+    out.extend_from_slice(&[
+        tip[0], tip[1], tip[2], color[0], color[1], color[2],
+        b1_x, b1_y, b1_z, color[0], color[1], color[2],
+        tip[0], tip[1], tip[2], color[0], color[1], color[2],
+        b2_x, b2_y, b2_z, color[0], color[1], color[2],
+    ]);
+}
+
+fn curvature_vector_lines(
+    closest: [f32; 3],
+    grad: &[f32],
+    rotated: &[f32],
+    arrow_len: f32,
+) -> Vec<f32> {
+    let [cx, cy, cz] = closest;
+    let z = 2.0 - cz;
+    if z <= 0.05 {
+        return Vec::new();
+    }
+    let focal = WIDTH / (2.0 * (std::f32::consts::PI / 6.0).tan());
+    let x = cx * focal / z + (WIDTH - 1.0) / 2.0;
+    let y = (HEIGHT - 1.0) / 2.0 - cy * focal / z;
+    if !x.is_finite() || !y.is_finite() || x < 0.0 || x >= WIDTH || y < 0.0 || y >= HEIGHT {
+        return Vec::new();
+    }
+
+    let x0 = (x.floor() as usize).min(WIDTH as usize - 1);
+    let x1 = (x0 + 1).min(WIDTH as usize - 1);
+    let fx = x - x0 as f32;
+
+    let y0 = (y.floor() as usize).min(HEIGHT as usize - 1);
+    let y1 = (y0 + 1).min(HEIGHT as usize - 1);
+    let fy = y - y0 as f32;
+
+    let sample_2d = |data: &[f32], stride: usize, offset: usize| -> f32 {
+        let i00 = (y0 * (WIDTH as usize) + x0) * stride + offset;
+        let i01 = (y0 * (WIDTH as usize) + x1) * stride + offset;
+        let i10 = (y1 * (WIDTH as usize) + x0) * stride + offset;
+        let i11 = (y1 * (WIDTH as usize) + x1) * stride + offset;
+        (data[i00] * (1.0 - fx) + data[i01] * fx) * (1.0 - fy)
+            + (data[i10] * (1.0 - fx) + data[i11] * fx) * fy
+    };
+
+    let gy = sample_2d(grad, 2, 0);
+    let gx = sample_2d(grad, 2, 1);
+    let g_norm = (gx * gx + gy * gy).sqrt();
+    if g_norm <= 1e-12 {
+        return Vec::new();
+    }
+    let b0_x = gx / g_norm;
+    let b0_y = gy / g_norm;
+
+    let da2 = sample_2d(rotated, 4, 0);
+    let db2 = sample_2d(rotated, 4, 3);
+    let diag_norm = (da2 * da2 + db2 * db2).sqrt();
+
+    let mut out = Vec::new();
+
+    // Vector 1: Normalized 2D direction of the gradient in 3D: [b0_x, -b0_y, 0.0]
+    append_arrow(&mut out, closest, [b0_x, -b0_y, 0.0], arrow_len, [0.2, 1.0, 0.3]);
+
+    // Vector 2: Diagonal terms in rotated as a single normalized vector with respect to rotated gradient
+    if diag_norm > 1e-12 {
+        let w0 = da2 / diag_norm;
+        let w1 = db2 / diag_norm;
+        let v2_x = w0 * b0_x + w1 * b0_y;
+        let v2_y = w0 * b0_y - w1 * b0_x;
+        append_arrow(&mut out, closest, [v2_x, -v2_y, 0.0], arrow_len, [1.0, 0.25, 0.75]);
+    }
+
+    out
 }
 
 fn format(name: &str) -> Result<wgpu::TextureFormat, JsValue> {
@@ -378,6 +484,8 @@ impl Renderer {
             depth_data: None,
             depth_range: (0.0, 1.0),
             depth_spread: 1.0,
+            grad_data: None,
+            rotated_data: None,
             base_lines: Vec::new(),
         })
     }
@@ -718,6 +826,13 @@ impl Renderer {
         }
     }
 
+    pub fn set_curvature(&mut self, grad: &[f32], rotated: &[f32]) {
+        if grad.len() == (WIDTH * HEIGHT * 2.0) as usize && rotated.len() == (WIDTH * HEIGHT * 4.0) as usize {
+            self.grad_data = Some(grad.to_vec());
+            self.rotated_data = Some(rotated.to_vec());
+        }
+    }
+
     pub fn update_grab_level_curve(&mut self, mx: f32, my: f32, mz: f32) -> Option<Vec<f32>> {
         let depth = self.depth_data.as_ref()?;
         let level = depth_from_z(mz, self.depth_range, self.depth_spread)?;
@@ -728,20 +843,26 @@ impl Renderer {
             level,
             2,
         );
+        let closest = closest_point_on_segments(&segments, [mx, my, mz])?;
         let mut combined = self.base_lines.clone();
         combined.extend_from_slice(&contour_lines);
+
+        if let (Some(grad), Some(rotated)) = (self.grad_data.as_ref(), self.rotated_data.as_ref()) {
+            let vector_lines = curvature_vector_lines(closest, grad, rotated, 0.08);
+            combined.extend_from_slice(&vector_lines);
+        }
+
         if !combined.is_empty() {
             self.lines = Some(
                 self.device
                     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("uploaded lines with level curve"),
+                        label: Some("uploaded lines with level curve and vectors"),
                         contents: bytemuck::cast_slice(&combined),
                         usage: wgpu::BufferUsages::VERTEX,
                     }),
             );
             self.line_count = (combined.len() / 6) as u32;
         }
-        let closest = closest_point_on_segments(&segments, [mx, my, mz])?;
         Some(vec![closest[0], closest[1], closest[2]])
     }
 

@@ -10,6 +10,8 @@ def stage_web():
         'models/depth-anything-v2-small.onnx',
         'models/sphere-detector.vmfb',
         'models/example.jpg',
+        'models/example-depth.tiff',
+        'models/example-disparity.tiff',
         'runtime/generated/sphere_runtime.mjs',
         'runtime/generated/sphere_runtime.wasm',
     ]

@@ -23,6 +23,9 @@ function rebuild(updateCloud=true) {
       viewer.setCloud(cloud.vertices);
       viewer.setDepthMap(depth, range[0], range[1], spread);
       viewer.setSpread(spread);
+      if (lastGrad && lastRotated) {
+        viewer.setCurvature?.(lastGrad, lastRotated);
+      }
     }
     const stride = (cloud.vertices.length % 10 === 0 && cloud.vertices.length % 6 !== 0) ? 10 : 6;
     $('point-count').textContent=`${(cloud.vertices.length/stride).toLocaleString()} POINTS`;
@@ -87,7 +90,11 @@ function startWorker(){
       } else if(data.type==='curvature'){
         lastGrad=data.grad;
         lastRotated=data.rotated;
-        if(debugMode) rebuild(true);
+        viewer?.setCurvature?.(lastGrad, lastRotated);
+        if(debugMode) {
+          rebuild(true);
+          updateLines();
+        }
       } else if(data.type==='error'){controls(false);status(data.message,true);if(depth)$('result-heading').textContent='Depth ready · detector did not complete';}
     }catch(error){controls(false);status(error.message,true);}
   };
@@ -127,12 +134,12 @@ $('example').addEventListener('click',async()=>{
 $('cancel').addEventListener('click',()=>{++job;worker?.terminate();worker=null;controls(false);for(const el of document.querySelectorAll('.stages .active'))el.classList.remove('active');status('Canceled. Choose another image to start again.');$('result-heading').textContent=depth?'Depth ready · detection canceled':'Canceled';});
 function updateLines() {
   if(!viewer) return;
-  if(!debugMode || !currentGrabs.length || !depth || !range) {
+  if(!debugMode || currentGrabs.length !== 1 || !depth || !range) {
     viewer.setLines(baseLines);
     return;
   }
   const spread=spreadFromSlider($('spread').value);
-  const grabLines=grabLevelCurveLines(depth,range,spread,currentGrabs);
+  const grabLines=grabLevelCurveLines(depth,range,spread,currentGrabs,lastGrad,lastRotated);
   if(!grabLines.length) {
     viewer.setLines(baseLines);
     return;
