@@ -180,6 +180,177 @@ export function depthLevelCurves(depth, range, spread = 1, numCurves = 100, step
   return new Float32Array(out);
 }
 
+export function depthFromZ(pz, range, spread = 1) {
+  if (!range || range.length < 2) return null;
+  const [lo, hi] = range;
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return null;
+  const term = 1 - pz / Math.max(1e-6, spread);
+  const clampedTerm = Math.max(0.4, Math.min(2.5, term));
+  const val = 1 / clampedTerm;
+  const t = Math.max(0, Math.min(1, (val - 0.45) / 1.55));
+  return lo + t * (hi - lo);
+}
+
+export function depthLevelCurveAt(depth, range, spread = 1, level, step = 2) {
+  if (!depth || depth.length !== WIDTH * HEIGHT || !range || !Number.isFinite(level)) {
+    return { lines: new Float32Array(), segments: [] };
+  }
+  const [lo, hi] = range;
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) {
+    return { lines: new Float32Array(), segments: [] };
+  }
+  const out = [];
+  const segments = [];
+  const s = Math.max(1, Math.floor(step));
+  const color = [0.2, 0.85, 0.95];
+
+  for (let y = 0; y + s < HEIGHT; y += s) {
+    for (let x = 0; x + s < WIDTH; x += s) {
+      const i0 = y * WIDTH + x;
+      const i1 = y * WIDTH + (x + s);
+      const i2 = (y + s) * WIDTH + (x + s);
+      const i3 = (y + s) * WIDTH + x;
+
+      const v0 = depth[i0], v1 = depth[i1], v2 = depth[i2], v3 = depth[i3];
+      if (!Number.isFinite(v0) || !Number.isFinite(v1) || !Number.isFinite(v2) || !Number.isFinite(v3)) continue;
+      if (v0 <= 0 || v1 <= 0 || v2 <= 0 || v3 <= 0) continue;
+
+      const minV = Math.min(v0, v1, v2, v3);
+      const maxV = Math.max(v0, v1, v2, v3);
+      if (level < minV || level > maxV) continue;
+
+      let mask = 0;
+      if (v0 >= level) mask |= 1;
+      if (v1 >= level) mask |= 2;
+      if (v2 >= level) mask |= 4;
+      if (v3 >= level) mask |= 8;
+
+      if (mask === 0 || mask === 15) continue;
+
+      const interp = (valA, valB, posA, posB) => {
+        const denom = valB - valA;
+        const t = Math.abs(denom) > 1e-6 ? Math.max(0, Math.min(1, (level - valA) / denom)) : 0.5;
+        return posA + t * (posB - posA);
+      };
+
+      const edgePt = edge => {
+        switch (edge) {
+          case 0: return [interp(v0, v1, x, x + s), y];
+          case 1: return [x + s, interp(v1, v2, y, y + s)];
+          case 2: return [interp(v3, v2, x, x + s), y + s];
+          case 3: return [x, interp(v0, v3, y, y + s)];
+        }
+      };
+
+      const lines = [];
+      switch (mask) {
+        case 1:  case 14: lines.push(3, 0); break;
+        case 2:  case 13: lines.push(0, 1); break;
+        case 3:  case 12: lines.push(3, 1); break;
+        case 4:  case 11: lines.push(1, 2); break;
+        case 5:           lines.push(3, 0, 1, 2); break;
+        case 6:  case 9:  lines.push(0, 2); break;
+        case 7:  case 8:  lines.push(3, 2); break;
+        case 10:          lines.push(0, 1, 2, 3); break;
+      }
+
+      for (let l = 0; l < lines.length; l += 2) {
+        const [pxA, pyA] = edgePt(lines[l]);
+        const [pxB, pyB] = edgePt(lines[l + 1]);
+        const pA = pointAt(pxA, pyA, level, range, spread);
+        const pB = pointAt(pxB, pyB, level, range, spread);
+        if (pA && pB && pA.every(Number.isFinite) && pB.every(Number.isFinite)) {
+          out.push(...pA, ...color, ...pB, ...color);
+          segments.push([pA[0], pA[1], pA[2], pB[0], pB[1], pB[2]]);
+        }
+      }
+    }
+  }
+  return { lines: new Float32Array(out), segments };
+}
+
+export function closestPointOnSegments(segments, point) {
+  if (!segments || !segments.length || !point || point.length < 3) return null;
+  let bestDistSq = Infinity;
+  let bestPt = null;
+  const [px, py, pz] = point;
+
+  for (let i = 0; i < segments.length; i++) {
+    const s = segments[i];
+    const ax = s[0], ay = s[1], az = s[2];
+    const bx = s[3], by = s[4], bz = s[5];
+    const dx = bx - ax, dy = by - ay, dz = bz - az;
+    const lenSq = dx * dx + dy * dy + dz * dz;
+    let u = 0;
+    if (lenSq > 1e-12) {
+      u = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy + (pz - az) * dz) / lenSq));
+    }
+    const cx = ax + u * dx, cy = ay + u * dy, cz = az + u * dz;
+    const distSq = (px - cx) ** 2 + (py - cy) ** 2 + (pz - cz) ** 2;
+    if (distSq < bestDistSq) {
+      bestDistSq = distSq;
+      bestPt = [cx, cy, cz];
+    }
+  }
+  return bestPt;
+}
+
+export function smallSphereLines(center, radius = 0.02, color = [1, 0.85, 0.2], segments = 24) {
+  if (!center || center.length < 3) return new Float32Array();
+  const out = [];
+  const [cx, cy, cz] = center;
+
+  // 3 orthogonal great circles
+  for (let i = 0; i < segments; i++) {
+    const a0 = (i / segments) * Math.PI * 2, a1 = ((i + 1) / segments) * Math.PI * 2;
+    out.push(
+      cx + radius * Math.cos(a0), cy + radius * Math.sin(a0), cz, ...color,
+      cx + radius * Math.cos(a1), cy + radius * Math.sin(a1), cz, ...color
+    );
+    out.push(
+      cx, cy + radius * Math.cos(a0), cz + radius * Math.sin(a0), ...color,
+      cx, cy + radius * Math.cos(a1), cz + radius * Math.sin(a1), ...color
+    );
+    out.push(
+      cx + radius * Math.sin(a0), cy, cz + radius * Math.cos(a0), ...color,
+      cx + radius * Math.sin(a1), cy, cz + radius * Math.cos(a1), ...color
+    );
+  }
+
+  // 2 latitude rings at +/- 45 deg
+  const rLat = radius * Math.SQRT1_2;
+  const dzLat = radius * Math.SQRT1_2;
+  for (const sign of [-1, 1]) {
+    const zLat = cz + sign * dzLat;
+    for (let i = 0; i < segments; i++) {
+      const a0 = (i / segments) * Math.PI * 2, a1 = ((i + 1) / segments) * Math.PI * 2;
+      out.push(
+        cx + rLat * Math.cos(a0), cy + rLat * Math.sin(a0), zLat, ...color,
+        cx + rLat * Math.cos(a1), cy + rLat * Math.sin(a1), zLat, ...color
+      );
+    }
+  }
+  return new Float32Array(out);
+}
+
+export function grabLevelCurveLines(depth, range, spread = 1, grabPositions = []) {
+  if (!depth || !range || !grabPositions || !grabPositions.length) return new Float32Array();
+  const out = [];
+  for (const grabPos of grabPositions) {
+    if (!grabPos || grabPos.length < 3) continue;
+    const level = depthFromZ(grabPos[2], range, spread);
+    if (!Number.isFinite(level)) continue;
+    const { lines, segments } = depthLevelCurveAt(depth, range, spread, level, 2);
+    for (let i = 0; i < lines.length; i++) out.push(lines[i]);
+    const closest = closestPointOnSegments(segments, grabPos);
+    if (closest) {
+      const sphere = smallSphereLines(closest, 0.02, [1, 0.85, 0.2]);
+      for (let i = 0; i < sphere.length; i++) out.push(sphere[i]);
+    }
+  }
+  return new Float32Array(out);
+}
+
 export function cloudBounds(vertices) {
   if (!vertices || vertices.length < 6) {
     return { minX: -0.5, maxX: 0.5, minY: -0.5, maxY: 0.5, minZ: -0.5, maxZ: 0.5 };

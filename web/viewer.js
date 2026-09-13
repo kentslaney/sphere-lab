@@ -239,6 +239,16 @@ export async function createViewer(canvas, button, status, options = {}) {
             const updateGrab = attachCloudGrab(active, space, grab, applyGrab, markers => {
               const feedback = grabFeedbackVertices(markers, currentViewerPos);
               renderer.set_grab_feedback(feedback);
+              if (options.onGrabMove) {
+                const modelGrabs = markers.map(m => {
+                  const dx = (m.position[0] - grab.position[0]) / grab.scale;
+                  const dy = (m.position[1] - grab.position[1]) / grab.scale;
+                  const dz = (m.position[2] - grab.position[2]) / grab.scale;
+                  const qInv = [-grab.rotation[0], -grab.rotation[1], -grab.rotation[2], grab.rotation[3]];
+                  return rotate(qInv, [dx, dy, dz]);
+                });
+                options.onGrabMove(modelGrabs);
+              }
             }, menu => {
               if (!menu) { renderer.set_menu(new Float32Array()); return; }
               if (menu.selected !== menuSelection) {
@@ -276,7 +286,7 @@ export async function createViewer(canvas, button, status, options = {}) {
                     renderer.set_menu_texture(menuPixels(config.selected, items, hint), MENU_WIDTH, height);
                     configTexture = key;
                   }
-                  renderer.set_menu(menuVertices(config.origin, currentViewerPos, height, 4, config.right));
+                  renderer.set_menu(menuVertices(config.origin, currentViewerPos, height, 3, config.right));
                 } else if (configWasOpen) renderer.set_menu(new Float32Array());
                 configWasOpen = config.isOpen;
                 if (viewerPose) {
@@ -353,7 +363,7 @@ export async function createViewer(canvas, button, status, options = {}) {
     }
 
     const touches = new Map();
-    const clearPointers = () => { touches.clear(); drag = null; renderer.set_grab_feedback(new Float32Array()); };
+    const clearPointers = () => { touches.clear(); drag = null; renderer.set_grab_feedback(new Float32Array()); options.onGrabMove?.([]); };
     const acceptsInput = attachViewportActivation(canvas, document.getElementById('viewport-exit'), clearPointers, () => !session && !stopped, report);
 
     canvas.addEventListener('pointerdown', event => {
@@ -391,6 +401,7 @@ export async function createViewer(canvas, button, status, options = {}) {
         targetAzimuth,
         targetElevation
       };
+      options.onGrabMove?.([targetPoint]);
     });
 
     canvas.addEventListener('pointermove', event => {
@@ -401,7 +412,9 @@ export async function createViewer(canvas, button, status, options = {}) {
         camPos = solveTouchCamera(camPos, getCameraVectors(), [...touches.values()].map(t => ({
           point: t.point, ray: getRaycast(t.clientX, t.clientY).worldRay,
         })));
-        notifyPose(); return;
+        notifyPose();
+        options.onGrabMove?.([...touches.values()].map(t => t.point));
+        return;
       }
       if (!drag || drag.pointerId !== event.pointerId) return;
       const { normCamRay } = getRaycast(event.clientX, event.clientY);
@@ -411,12 +424,14 @@ export async function createViewer(canvas, button, status, options = {}) {
       yaw = drag.targetAzimuth - camAlphaX;
       pitch = Math.max(-1.4, Math.min(1.4, drag.targetElevation - camAlphaY));
       notifyPose();
+      options.onGrabMove?.([drag.targetPoint]);
     });
 
     for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
       canvas.addEventListener(type, event => {
         touches.delete(event.pointerId);
         if (drag?.pointerId === event.pointerId) { drag = null; renderer.set_grab_feedback(new Float32Array()); }
+        if (!touches.size && !drag) options.onGrabMove?.([]);
       });
     }
     canvas.addEventListener('contextmenu', event => {

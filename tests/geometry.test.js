@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {sphereLines,depthLevelCurves,normalizeImage,resizeDepth,selectDetections,pointCloud,pointAt,displayZ,WIDTH,HEIGHT,cloudBounds,computeViewportPinchScale} from '../web/geometry.js';
+import {sphereLines,depthLevelCurves,depthFromZ,depthLevelCurveAt,closestPointOnSegments,smallSphereLines,grabLevelCurveLines,normalizeImage,resizeDepth,selectDetections,pointCloud,pointAt,displayZ,WIDTH,HEIGHT,cloudBounds,computeViewportPinchScale} from '../web/geometry.js';
 test('RGB normalization is NCHW and uses ImageNet values',()=>{
   const out=normalizeImage(new Uint8ClampedArray([255,0,128,255,0,255,0,255]),2,1);
   assert.equal(out.length,6);
@@ -128,4 +128,69 @@ test('depthLevelCurves generates valid 3D isocontour line segments', () => {
   assert.ok(curves100.length > curves7.length);
   assert.equal(curves100.length % 12, 0);
   assert.ok(curves100.length <= 65536 * 12);
+});
+
+test('depthFromZ inverts displayZ across depth range and spread', () => {
+  const range = [0.5, 4.0];
+  for (const spread of [0.5, 1.0, 2.0]) {
+    for (const d of [0.5, 1.0, 2.5, 4.0]) {
+      const z = displayZ(d, range, spread);
+      const pz = 2 - z;
+      const recovered = depthFromZ(pz, range, spread);
+      assert.ok(Math.abs(recovered - d) < 1e-4);
+    }
+  }
+  assert.equal(depthFromZ(0, null), null);
+  assert.equal(depthFromZ(0, [4, 1]), null);
+});
+
+test('closestPointOnSegments finds closest point on 3D line segments', () => {
+  const segments = [
+    [0, 0, 0,  1, 0, 0],
+    [1, 0, 0,  1, 1, 0],
+  ];
+  // Point closest to first segment at x=0.4
+  const pt1 = closestPointOnSegments(segments, [0.4, 0.5, 0]);
+  assert.ok(Math.abs(pt1[0] - 0.4) < 1e-6);
+  assert.ok(Math.abs(pt1[1] - 0) < 1e-6);
+  assert.ok(Math.abs(pt1[2] - 0) < 1e-6);
+
+  // Point closest to corner
+  const pt2 = closestPointOnSegments(segments, [1.5, -0.5, 0]);
+  assert.ok(Math.abs(pt2[0] - 1) < 1e-6);
+  assert.ok(Math.abs(pt2[1] - 0) < 1e-6);
+
+  // Fallbacks
+  assert.equal(closestPointOnSegments([], [0, 0, 0]), null);
+  assert.equal(closestPointOnSegments(segments, null), null);
+});
+
+test('smallSphereLines generates valid wireframe sphere line segments', () => {
+  const center = [0.1, 0.2, 0.3];
+  const lines = smallSphereLines(center, 0.02, [1, 0.85, 0.2], 16);
+  assert.ok(lines.length > 0);
+  assert.equal(lines.length % 12, 0);
+  assert.ok(lines.every(Number.isFinite));
+  assert.equal(smallSphereLines(null).length, 0);
+});
+
+test('grabLevelCurveLines draws level curve and marks closest point with small sphere', () => {
+  const depth = new Float32Array(WIDTH * HEIGHT);
+  for (let y = 0; y < HEIGHT; y++) {
+    for (let x = 0; x < WIDTH; x++) {
+      depth[y * WIDTH + x] = 1 + (x / WIDTH) * 3;
+    }
+  }
+  const range = [1, 4];
+  const midZ = 2 - displayZ(2.5, range, 1);
+  const grabPos = [0, 0, midZ];
+
+  const lines = grabLevelCurveLines(depth, range, 1, [grabPos]);
+  assert.ok(lines.length > 0);
+  assert.equal(lines.length % 12, 0);
+  assert.ok(lines.every(Number.isFinite));
+
+  // Empty grabs returns empty Float32Array
+  assert.equal(grabLevelCurveLines(depth, range, 1, []).length, 0);
+  assert.equal(grabLevelCurveLines(null, range, 1, [grabPos]).length, 0);
 });
