@@ -280,8 +280,26 @@ function pushMidpointTextBox(vertices, midpoint, text, viewerPos = [0, 0, 0]) {
  *   with a lighter text box highlight rendered in front of the line displaying
  *   the updated scaled distance.
  */
-export function grabFeedbackVertices(markers, viewerPos = [0, 0, 0]) {
+export function grabFeedbackVertices(markers, viewerPos = [0, 0, 0], closestPointWorld = null, isSingleDebugGrab = false) {
   const vertices = [];
+  if (isSingleDebugGrab && markers.length === 1) {
+    const marker = markers[0];
+    const elapsed = marker.elapsed || 0;
+    const t = Math.max(0, Math.min(1, elapsed / 300));
+    const progress = t * t * (3 - 2 * t);
+    const color = [1, 1, 1];
+
+    // Translucent sphere at the point being grabbed
+    pushSphere(vertices, marker.position, 0.045, color, 0.18);
+
+    // Solid interior point animates to closest point on the level curve
+    const target = closestPointWorld || marker.position;
+    const beadCenter = marker.position.map((v, i) => v + (target[i] - v) * progress);
+    pushSphere(vertices, beadCenter, 0.009, color, 1.0);
+
+    return new Float32Array(vertices);
+  }
+
   // Render hand beads/shells
   for (const { origin, position, elapsed = 0 } of markers.slice(0, 2)) {
     const t = Math.max(0, Math.min(1, elapsed / 300));

@@ -45,6 +45,7 @@ export async function createViewer(canvas, button, status, options = {}) {
     let cloudPoints = null;
     let worldPoints = null, worldDirty = true;
     let modelOffset = [0, 0, 0], modelScale = 1, modelRotation = [0, 0, 0, 1];
+    let debugMode = false;
     const config = new XRConfig(options.getConfig ?? (() => ({ spread: 1, threshold: 0.1, outlines: true })), options.setConfig ?? (() => {}));
 
     renderer.set_pose(0, 0, 0);
@@ -236,8 +237,29 @@ export async function createViewer(canvas, button, status, options = {}) {
             let currentViewerPos = [0, 0, 0];
             let menuSelection = -1, menuOrigin = [0, 0, -1], configTexture = '';
             let configWasOpen = false;
-            const updateGrab = attachCloudGrab(active, space, grab, applyGrab, markers => {
-              const feedback = grabFeedbackVertices(markers, currentViewerPos);
+            const updateGrab = attachCloudGrab(active, space, grab, applyGrab, (markers, meta = {}) => {
+              const isSingleDebugGrab = Boolean(meta.isSingleDebugGrab && markers.length === 1);
+              let closestPointWorld = null;
+
+              if (isSingleDebugGrab) {
+                const m = markers[0];
+                const dx = (m.position[0] - grab.position[0]) / grab.scale;
+                const dy = (m.position[1] - grab.position[1]) / grab.scale;
+                const dz = (m.position[2] - grab.position[2]) / grab.scale;
+                const qInv = [-grab.rotation[0], -grab.rotation[1], -grab.rotation[2], grab.rotation[3]];
+                const modelPos = rotate(qInv, [dx, dy, dz]);
+
+                const closestModel = renderer.update_grab_level_curve(modelPos[0], modelPos[1], modelPos[2]);
+                if (closestModel && closestModel.length >= 3) {
+                  const scaledPt = [closestModel[0] * grab.scale, closestModel[1] * grab.scale, closestModel[2] * grab.scale];
+                  const rotPt = rotate(grab.rotation, scaledPt);
+                  closestPointWorld = [rotPt[0] + grab.position[0], rotPt[1] + grab.position[1], rotPt[2] + grab.position[2]];
+                }
+              } else {
+                renderer.clear_grab_level_curve();
+              }
+
+              const feedback = grabFeedbackVertices(markers, currentViewerPos, closestPointWorld, isSingleDebugGrab);
               renderer.set_grab_feedback(feedback);
               if (options.onGrabMove) {
                 const modelGrabs = markers.map(m => {
@@ -266,7 +288,7 @@ export async function createViewer(canvas, button, status, options = {}) {
               } else if (selected === 1) {
                 options.onDebug?.();
               }
-            }, config);
+            }, config, () => debugMode);
             function frame(time, xrFrame) {
               if (session !== active || stopped) return;
               // Request next frame at the start so visionOS compositor watchdog never times out
@@ -479,6 +501,14 @@ export async function createViewer(canvas, button, status, options = {}) {
         renderer.set_grab_feedback(new Float32Array());
       },
       getCamera: getCameraState,
+      setDebug: enabled => { debugMode = Boolean(enabled); },
+      setDepthMap: (depth, minDepth, maxDepth, spread) => {
+        renderer.set_depth_map(depth, minDepth, maxDepth, spread);
+      },
+      setSpread: spread => {
+        renderer.set_spread(spread);
+      },
+      getRenderer: () => renderer,
       triggerDebug: () => options.onDebug?.(),
       onPose: cb => {
         onPoseCallbacks.push(cb);

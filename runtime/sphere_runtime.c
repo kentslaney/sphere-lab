@@ -13,6 +13,7 @@ static iree_vm_instance_t* instance;
 static iree_hal_device_t* device;
 static iree_vm_context_t* context;
 static iree_vm_function_t function;
+static iree_vm_function_t curvature_function;
 static char error_message[2048];
 
 static int result(iree_status_t status) {
@@ -59,6 +60,8 @@ int sphere_init(const unsigned char* bytes, unsigned int length) {
   TRY(iree_vm_context_create_with_modules(instance, IREE_VM_CONTEXT_FLAG_NONE, 2, modules, allocator, &context));
   TRY(iree_vm_module_lookup_function_by_name(graph, IREE_VM_FUNCTION_LINKAGE_EXPORT,
       iree_make_cstring_view("main"), &function));
+  iree_vm_module_lookup_function_by_name(graph, IREE_VM_FUNCTION_LINKAGE_EXPORT,
+      iree_make_cstring_view("curvature"), &curvature_function);
 cleanup:
   iree_vm_module_release(graph);
   iree_vm_module_release(hal);
@@ -93,6 +96,48 @@ int sphere_run(const float* input, unsigned int count, float* output) {
   }
   TRY(iree_hal_device_transfer_d2h(device, iree_hal_buffer_view_buffer(out), 0, output,
       56 * sizeof(float), IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+cleanup:
+  iree_vm_ref_release(&ref);
+  iree_hal_buffer_view_release(tensor);
+  iree_vm_list_release(inputs);
+  iree_vm_list_release(outputs);
+  return result(status);
+}
+
+int sphere_run_curvature(const float* input, unsigned int count, float* grad_out, float* rotated_out) {
+  if (!context || count != 392 * 518) return result(iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "Expected 392x518 depth and initialized graph"));
+  iree_status_t status = iree_ok_status();
+  iree_allocator_t allocator = iree_allocator_system();
+  iree_hal_buffer_view_t* tensor = NULL;
+  iree_vm_list_t* inputs = NULL;
+  iree_vm_list_t* outputs = NULL;
+  iree_vm_ref_t ref = iree_vm_ref_null();
+  iree_hal_dim_t shape[] = {392, 518};
+  TRY(iree_hal_buffer_view_allocate_buffer_copy(device, iree_hal_device_allocator(device),
+      2, shape, IREE_HAL_ELEMENT_TYPE_FLOAT_32, IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
+      (iree_hal_buffer_params_t){.type=IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL, .usage=IREE_HAL_BUFFER_USAGE_DEFAULT},
+      iree_make_const_byte_span(input, count * sizeof(float)), &tensor));
+  TRY(iree_vm_list_create(iree_vm_make_undefined_type_def(), 1, allocator, &inputs));
+  ref = iree_hal_buffer_view_move_ref(tensor); tensor = NULL;
+  TRY(iree_vm_list_push_ref_move(inputs, &ref));
+  TRY(iree_vm_list_create(iree_vm_make_undefined_type_def(), 2, allocator, &outputs));
+  TRY(iree_vm_invoke(context, curvature_function, IREE_VM_INVOCATION_FLAG_NONE, NULL, inputs, outputs, allocator));
+  iree_hal_buffer_view_t* out_grad = iree_vm_list_get_buffer_view_assign(outputs, 0);
+  iree_hal_buffer_view_t* out_rotated = iree_vm_list_get_buffer_view_assign(outputs, 1);
+  if (!out_grad || iree_hal_buffer_view_byte_length(out_grad) != 392 * 518 * 2 * sizeof(float)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "Expected curvature grad output [392,518,2]"); goto cleanup;
+  }
+  if (!out_rotated || iree_hal_buffer_view_byte_length(out_rotated) != 392 * 518 * 4 * sizeof(float)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "Expected curvature rotated output [392,518,2,2]"); goto cleanup;
+  }
+  if (grad_out) {
+    TRY(iree_hal_device_transfer_d2h(device, iree_hal_buffer_view_buffer(out_grad), 0, grad_out,
+        392 * 518 * 2 * sizeof(float), IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+  }
+  if (rotated_out) {
+    TRY(iree_hal_device_transfer_d2h(device, iree_hal_buffer_view_buffer(out_rotated), 0, rotated_out,
+        392 * 518 * 4 * sizeof(float), IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+  }
 cleanup:
   iree_vm_ref_release(&ref);
   iree_hal_buffer_view_release(tensor);

@@ -50,7 +50,7 @@ export class CloudGrab {
   }
 }
 
-export function attachCloudGrab(session, space, grab, apply, feedback = () => {}, menu = () => {}, select = () => {}, config = null) {
+export function attachCloudGrab(session, space, grab, apply, feedback = () => {}, menu = () => {}, select = () => {}, config = null, isDebug = () => false) {
   const held = new Set();
   const origins = new Map();
   let lastHandCount = 0;
@@ -61,7 +61,7 @@ export function attachCloudGrab(session, space, grab, apply, feedback = () => {}
     activeMenu = null; menu(null);
     if (selected !== undefined && commit) select(selected);
   };
-  const hide = () => { origins.clear(); lastHandCount = 0; feedback([]); };
+  const hide = () => { origins.clear(); lastHandCount = 0; feedback([], { isSingleDebugGrab: false }); };
   const start = event => {
     if (held.has(event.inputSource)) return;
     const time = now(event);
@@ -186,7 +186,14 @@ export function attachCloudGrab(session, space, grab, apply, feedback = () => {}
       const rec = origins.get(source);
       return { ...rec, position, elapsed: time - rec.startedAt };
     });
-    feedback(markers);
-    if (grab.update(hands)) apply();
+
+    const debugActive = typeof isDebug === 'function' ? isDebug() : Boolean(isDebug);
+    if (debugActive && activeEntries.length === 1) {
+      grab.release();
+      feedback(markers, { isSingleDebugGrab: true });
+    } else {
+      feedback(markers, { isSingleDebugGrab: false });
+      if (grab.update(hands)) apply();
+    }
   };
 }

@@ -3,7 +3,7 @@
 import json, pathlib, sys
 import numpy as np
 import iree.runtime as rt
-from export_detector import detect, HEIGHT, WIDTH
+from export_detector import detect, curvature, HEIGHT, WIDTH
 ROOT=pathlib.Path(__file__).resolve().parent.parent
 out=ROOT/'tests/generated';out.mkdir(exist_ok=True)
 y,x=np.mgrid[:HEIGHT,:WIDTH]
@@ -12,11 +12,20 @@ z=np.where(r2<65**2,3-np.sqrt(np.maximum(0,65**2-r2))/80,4).astype(np.float32)
 d=(1/z).astype(np.float32)
 d.tofile(out/'synthetic-depth.bin')
 expected=np.asarray(detect(d))
+expected_grad, expected_rotated = [np.asarray(x) for x in curvature(d)]
 config=rt.Config('local-sync')
 module=rt.VmModule.copy_buffer(config.vm_instance,(ROOT/'models/sphere-detector.vmfb').read_bytes())
 ctx=rt.SystemContext(config=config);ctx.add_vm_module(module)
 result=ctx.modules[module.name].main(d)
 actual=np.array(result.to_host(),copy=True)
+curv_result=ctx.modules[module.name].curvature(d)
+actual_grad=np.array(curv_result[0].to_host(),copy=True)
+actual_rotated=np.array(curv_result[1].to_host(),copy=True)
+
+np.testing.assert_allclose(actual_grad, expected_grad, atol=1e-3)
+np.testing.assert_allclose(actual_rotated, expected_rotated, atol=1e-3)
+print('Curvature grad and rotated match between JAX and IREE VMVX.')
+
 # The symmetric fixture causes tied candidates; compare geometric recovery and
 # report score drift instead of hiding it behind a permissive score tolerance.
 for name,values in [('JAX',expected),('IREE',actual)]:
@@ -32,5 +41,5 @@ report={'jax':expected.tolist(),'iree':actual.tolist(),
         'topScoreDifference':float(abs(expected[0,0]-actual[0,0])),
         'note':'Candidate score/order can differ across floating-point backends; do not treat scores as calibrated probabilities.'}
 (out/'detector-reference.json').write_text(json.dumps(report,indent=2))
-del result,ctx,module,config
+del result,curv_result,ctx,module,config
 print('Synthetic sphere recovered by both backends; references saved.')

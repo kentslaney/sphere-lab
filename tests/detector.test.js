@@ -34,5 +34,20 @@ test('compiled detector recovers a known sphere and survives repeated invocation
     }
     assert.notEqual(m._sphere_run(input,1,out),0);
     assert.match(m.UTF8ToString(m._sphere_error()),/392x518/);
+
+    const gradPtr = m._malloc(392 * 518 * 2 * 4);
+    const rotatedPtr = m._malloc(392 * 518 * 4 * 4);
+    try {
+      assert.equal(m._sphere_run_curvature(input, inputBytes.length / 4, gradPtr, rotatedPtr), 0, m.UTF8ToString(m._sphere_error()));
+      const gradValues = m.HEAPF32.slice(gradPtr / 4, gradPtr / 4 + 392 * 518 * 2);
+      const rotatedValues = m.HEAPF32.slice(rotatedPtr / 4, rotatedPtr / 4 + 392 * 518 * 4);
+      assert.equal(gradValues.length, 392 * 518 * 2);
+      assert.equal(rotatedValues.length, 392 * 518 * 4);
+      assert.ok(gradValues.every(Number.isFinite));
+      assert.ok(rotatedValues.every(Number.isFinite));
+    } finally {
+      m._free(gradPtr);
+      m._free(rotatedPtr);
+    }
   }finally{m._sphere_close();m._free(graphPtr);m._free(input);m._free(out);}
 });

@@ -27,6 +27,23 @@ test('point cloud skips invalid values and retains normalized colors',()=>{
   assert.ok(vertices.every(Number.isFinite));assert.equal(vertices[3],1);
 });
 
+test('point cloud includes 4 rotated floats when curvature is provided',()=>{
+  const d=new Float32Array(WIDTH*HEIGHT).fill(1),rgba=new Uint8ClampedArray(WIDTH*HEIGHT*4).fill(255);
+  const rot=new Float32Array(WIDTH*HEIGHT*4).fill(0.5);
+  d[0]=NaN;
+  const {vertices}=pointCloud(d,rgba,1,2,rot);
+  assert.equal(vertices.length,(Math.ceil(WIDTH/2)*Math.ceil(HEIGHT/2)-1)*10);
+  assert.ok(vertices.every(Number.isFinite));
+  assert.equal(vertices[6], 0.5);
+  assert.equal(vertices[7], 0.5);
+  assert.equal(vertices[8], 0.5);
+  assert.equal(vertices[9], 0.5);
+
+  const b = cloudBounds(vertices);
+  assert.ok(Number.isFinite(b.minX));
+  assert.ok(Number.isFinite(b.maxX));
+});
+
 test('fitted outlines use exported depth geometry rather than center-pixel depth',()=>{
   const detection={x0:194,y0:131,x1:324,y1:261,centerDepth:3,depthScale:80};
   const range=[0.2,0.5];

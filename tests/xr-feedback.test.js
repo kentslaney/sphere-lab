@@ -110,3 +110,27 @@ test('buildDebugSphereVertices generates valid triangle mesh at resolved raycast
   assert.ok(Math.abs(avgY / count - center[1]) < 1e-3);
   assert.ok(Math.abs(avgZ / count - center[2]) < 1e-3);
 });
+
+test('single debug grab renders translucent shell at grab point and solid bead at closest point', () => {
+  const marker = { origin: [0, 0, 0], position: [0.2, 0.3, -1], slot: 0, elapsed: 1000 };
+  const closest = [0.5, 0.6, -1.2];
+  const vertices = grabFeedbackVertices([marker], [0, 0, 0], closest, true);
+
+  assert.ok(vertices.length > 0);
+  assert.equal(vertices.length % 21, 0);
+
+  const sphereLen = vertices.length / 2;
+  // First sphere: translucent shell at marker.position with radius 0.045, alpha 0.18
+  for (let i = 0; i < sphereLen; i += 7) {
+    const d = Math.hypot(vertices[i] - marker.position[0], vertices[i + 1] - marker.position[1], vertices[i + 2] - marker.position[2]);
+    assert.ok(Math.abs(d - 0.045) < 1e-5);
+    assert.ok(Math.abs(vertices[i + 6] - 0.18) < 1e-5);
+  }
+
+  // Second sphere: solid bead at closest with radius 0.009, alpha 1.0 (elapsed = 1000 > 300)
+  for (let i = sphereLen; i < vertices.length; i += 7) {
+    const d = Math.hypot(vertices[i] - closest[0], vertices[i + 1] - closest[1], vertices[i + 2] - closest[2]);
+    assert.ok(Math.abs(d - 0.009) < 1e-5);
+    assert.ok(Math.abs(vertices[i + 6] - 1.0) < 1e-5);
+  }
+});

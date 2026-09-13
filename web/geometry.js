@@ -45,13 +45,21 @@ export function pointAt(x,y,d,range,spread=1) {
   const focal = WIDTH/(2*Math.tan(Math.PI/6)); // assumed 60° horizontal field of view
   return [(x-(WIDTH-1)/2)*z/focal, ((HEIGHT-1)/2-y)*z/focal, 2-z];
 }
-export function pointCloud(depth,rgba,spread=1,step=1) {
+export function pointCloud(depth,rgba,spread=1,step=1,rotated=null) {
   if (depth.length!==WIDTH*HEIGHT || rgba.length!==WIDTH*HEIGHT*4) throw new Error('Invalid point cloud input.');
   const range=depthRange(depth), data=[];
+  const hasRot = rotated && rotated.length === WIDTH * HEIGHT * 4;
   for (let y=0;y<HEIGHT;y+=step) for (let x=0;x<WIDTH;x+=step) {
     const i=y*WIDTH+x,d=depth[i];
     if (!Number.isFinite(d)||d<=0) continue;
-    data.push(...pointAt(x,y,d,range,spread), rgba[i*4]/255,rgba[i*4+1]/255,rgba[i*4+2]/255);
+    const pt = pointAt(x,y,d,range,spread);
+    const r = rgba[i*4]/255, g = rgba[i*4+1]/255, b = rgba[i*4+2]/255;
+    if (hasRot) {
+      const ri = i * 4;
+      data.push(...pt, r, g, b, rotated[ri], rotated[ri+1], rotated[ri+2], rotated[ri+3]);
+    } else {
+      data.push(...pt, r, g, b);
+    }
   }
   return {vertices:new Float32Array(data),range};
 }
@@ -355,10 +363,11 @@ export function cloudBounds(vertices) {
   if (!vertices || vertices.length < 6) {
     return { minX: -0.5, maxX: 0.5, minY: -0.5, maxY: 0.5, minZ: -0.5, maxZ: 0.5 };
   }
+  const stride = (vertices.length % 10 === 0 && vertices.length % 6 !== 0) ? 10 : 6;
   let minX = Infinity, maxX = -Infinity;
   let minY = Infinity, maxY = -Infinity;
   let minZ = Infinity, maxZ = -Infinity;
-  for (let i = 0; i < vertices.length; i += 6) {
+  for (let i = 0; i < vertices.length; i += stride) {
     const x = vertices[i], y = vertices[i+1], z = vertices[i+2];
     if (x < minX) minX = x;
     if (x > maxX) maxX = x;
@@ -399,7 +408,8 @@ export function computeViewportPinchScale(points, {
   let allDepth = 0, allCount = 0;
 
   if (points && points.length >= 6) {
-    const step = Math.max(1, Math.floor(points.length / (6 * 2000))) * 6;
+    const stride = (points.length % 10 === 0 && points.length % 6 !== 0) ? 10 : 6;
+    const step = Math.max(1, Math.floor(points.length / (stride * 2000))) * stride;
     for (let i = 0; i < points.length; i += step) {
       const x = points[i], y = points[i + 1], z = points[i + 2];
       if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;

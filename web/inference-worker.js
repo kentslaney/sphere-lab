@@ -65,10 +65,39 @@ async function loadDetector(id) {
   runtime=loaded;graphPointer=ptr;
 }
 let busy=false;
-onmessage=async ({data:{id,type,rgba,depth:provided}})=>{
+onmessage=async ({data:{id,type,rgba,depth:provided,debug}})=>{
   if(busy){postMessage({id,type:'error',message:'Inference is already running.'});return;}
   busy=true;
   try {
+    if(type==='curvature') {
+      const depth=provided;
+      if(!(depth instanceof Float32Array)||depth.length!==WIDTH*HEIGHT) throw new Error('Detector requires a 392×518 float32 depth map.');
+      if(!depth.every(x=>Number.isFinite(x)&&x>0)) throw new Error('Depth contains invalid or zero values; detection cannot run reliably.');
+      await loadDetector(id);
+      progress(id,'detecting','Computing depth curvature on Wasm CPU…');
+      const start=performance.now();
+      const input=runtime._malloc(depth.byteLength);
+      const grad=runtime._malloc(WIDTH*HEIGHT*2*4);
+      const rotated=runtime._malloc(WIDTH*HEIGHT*4*4);
+      if(!input||!grad||!rotated){
+        if(input) runtime._free(input);
+        if(grad) runtime._free(grad);
+        if(rotated) runtime._free(rotated);
+        throw new Error('Curvature memory allocation failed.');
+      }
+      try {
+        runtime.HEAPF32.set(depth,input/4);
+        if(runtime._sphere_run_curvature(input,depth.length,grad,rotated)) throw new Error(runtime.UTF8ToString(runtime._sphere_error()));
+        const gradValues=runtime.HEAPF32.slice(grad/4,grad/4+WIDTH*HEIGHT*2);
+        const rotatedValues=runtime.HEAPF32.slice(rotated/4,rotated/4+WIDTH*HEIGHT*4);
+        postMessage({id,type:'curvature',grad:gradValues,rotated:rotatedValues,elapsed:performance.now()-start},[gradValues.buffer,rotatedValues.buffer]);
+        return;
+      } finally {
+        runtime._free(input);
+        runtime._free(grad);
+        runtime._free(rotated);
+      }
+    }
     let depth=provided;
     if(type==='infer') {
       await loadDepth(id);
@@ -114,6 +143,23 @@ onmessage=async ({data:{id,type,rgba,depth:provided}})=>{
       if(runtime._sphere_run(input,depth.length,output)) throw new Error(runtime.UTF8ToString(runtime._sphere_error()));
       const candidates=runtime.HEAPF32.slice(output/4,output/4+56);
       postMessage({id,type:'result',candidates,elapsed:performance.now()-start},[candidates.buffer]);
+
+      if(debug) {
+        const grad=runtime._malloc(WIDTH*HEIGHT*2*4);
+        const rotated=runtime._malloc(WIDTH*HEIGHT*4*4);
+        if(grad && rotated) {
+          try {
+            if(runtime._sphere_run_curvature(input,depth.length,grad,rotated)===0) {
+              const gradValues=runtime.HEAPF32.slice(grad/4,grad/4+WIDTH*HEIGHT*2);
+              const rotatedValues=runtime.HEAPF32.slice(rotated/4,rotated/4+WIDTH*HEIGHT*4);
+              postMessage({id,type:'curvature',grad:gradValues,rotated:rotatedValues,elapsed:performance.now()-start},[gradValues.buffer,rotatedValues.buffer]);
+            }
+          } finally {
+            runtime._free(grad);
+            runtime._free(rotated);
+          }
+        }
+      }
     } finally {runtime._free(input);runtime._free(output);}
   } catch(error) {
     console.error(error);

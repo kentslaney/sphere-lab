@@ -6,6 +6,7 @@ const $=id=>document.getElementById(id);
 let viewer=null, worker=null, job=0, rgba=null, depth=null, candidates=null, range=null, bounds=null, cloudVertices=null;
 let selected=[], sourceName='', depthMs=0, detectorMs=0, busy=false, debugMode=false;
 let baseLines=new Float32Array(), currentGrabs=[];
+let lastGrad=null, lastRotated=null;
 const photo=$('photo').getContext('2d'),depthCanvas=$('depth').getContext('2d');
 function status(message,error=false){$('status').textContent=message;$('status').classList.toggle('error',error);}
 function controls(running){busy=running;$('file').disabled=running;$('example').disabled=running;$('cancel').hidden=!running;}
@@ -14,12 +15,17 @@ function rebuild(updateCloud=true) {
   if(!depth||!rgba) return;
   const spread=spreadFromSlider($('spread').value), threshold=Number($('threshold').value);
   if(updateCloud) {
-    const cloud=pointCloud(depth,rgba,spread);
+    const cloud=pointCloud(depth,rgba,spread,1,debugMode ? lastRotated : null);
     range=cloud.range;
     cloudVertices=cloud.vertices;
     bounds=cloudBounds(cloud.vertices);
-    if(viewer)viewer.setCloud(cloud.vertices);
-    $('point-count').textContent=`${(cloud.vertices.length/6).toLocaleString()} POINTS`;
+    if(viewer) {
+      viewer.setCloud(cloud.vertices);
+      viewer.setDepthMap(depth, range[0], range[1], spread);
+      viewer.setSpread(spread);
+    }
+    const stride = (cloud.vertices.length % 10 === 0 && cloud.vertices.length % 6 !== 0) ? 10 : 6;
+    $('point-count').textContent=`${(cloud.vertices.length/stride).toLocaleString()} POINTS`;
   }
   const allLines=[];
   selected=candidates?selectDetections(candidates,threshold):[];
@@ -78,6 +84,10 @@ function startWorker(){
         $('download').disabled=false;controls(false);
         status('Finished. Explore the cloud or adjust the score threshold.');
         $('timing').textContent=`Depth ${(depthMs/1000).toFixed(2)} s · Detector ${(detectorMs/1000).toFixed(2)} s`;
+      } else if(data.type==='curvature'){
+        lastGrad=data.grad;
+        lastRotated=data.rotated;
+        if(debugMode) rebuild(true);
       } else if(data.type==='error'){controls(false);status(data.message,true);if(depth)$('result-heading').textContent='Depth ready · detector did not complete';}
     }catch(error){controls(false);status(error.message,true);}
   };
@@ -103,8 +113,9 @@ async function analyze(blob,name){
       photo.drawImage(bitmap,(bitmap.width-cropWidth)/2,(bitmap.height-cropHeight)/2,cropWidth,cropHeight,0,0,WIDTH,HEIGHT);
     } finally {bitmap.close();}
     rgba=photo.getImageData(0,0,WIDTH,HEIGHT).data;
+    lastGrad=null;lastRotated=null;
     $('filename').textContent=`${name} · center crop ${WIDTH} × ${HEIGHT} · processed locally`;
-    stage('depth','active');startWorker();worker.postMessage({id:currentJob,type:'infer',rgba});
+    stage('depth','active');startWorker();worker.postMessage({id:currentJob,type:'infer',rgba,debug:debugMode});
   } catch(error){if(currentJob!==job)return;controls(false);status(`Could not analyze this image: ${error.message}. Try a JPEG or PNG.`,true);}
 }
 $('file').addEventListener('change',()=>{const file=$('file').files[0];if(file)analyze(file,file.name);$('file').value='';});
@@ -189,8 +200,12 @@ try {
     },
     onDebug: () => {
       debugMode = !debugMode;
+      viewer?.setDebug(debugMode);
       status(debugMode ? 'Debug: level curve tracks active grab' : 'Debug mode off');
-      updateLines();
+      if (debugMode && !lastRotated && depth && worker) {
+        worker.postMessage({ id: job, type: 'curvature', depth });
+      }
+      rebuild(true);
     },
     showConfig,
   });

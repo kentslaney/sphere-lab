@@ -200,3 +200,39 @@ test('tracking loss closes menu without selecting', () => {
   h.event('selectend', 230);
   assert.equal(h.shown.at(-1), null); assert.deepEqual(h.selected, []);
 });
+
+test('debug mode suppresses navigation for single grab and enables it for double grab', () => {
+  const listeners = {};
+  const session = { visibilityState: 'visible', addEventListener: (name, fn) => listeners[name] = fn };
+  const g = new CloudGrab();
+  let changes = 0;
+  let feedbackMeta = null;
+  const a = { gripSpace: { x: 0 } }, b = { gripSpace: { x: 1 } };
+  const frame = { getPose: space => ({ transform: { position: { x: space.x, y: 0, z: -1 } } }) };
+
+  const update = attachCloudGrab(
+    session, {}, g, () => changes++,
+    (markers, meta) => { feedbackMeta = meta; },
+    () => {}, () => {}, null,
+    () => true // isDebug enabled
+  );
+
+  // Single hand pinch in debug mode
+  listeners.selectstart({ inputSource: a });
+  update(frame);
+  a.gripSpace.x = 2;
+  update(frame);
+  // Navigation changes should NOT occur
+  assert.equal(changes, 0);
+  assert.deepEqual(g.position, [0, 0, -2]); // initial position unchanged
+  assert.equal(feedbackMeta?.isSingleDebugGrab, true);
+
+  // Second hand pinch (double grab) in debug mode
+  listeners.selectstart({ inputSource: b });
+  update(frame);
+  b.gripSpace.x = 3;
+  update(frame);
+  // Double grab should navigate
+  assert.ok(changes > 0);
+  assert.equal(feedbackMeta?.isSingleDebugGrab, false);
+});

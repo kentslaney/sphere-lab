@@ -40,6 +40,168 @@ pub struct Renderer {
     offset: Vec3,
     grab_rotation: Quat,
     scale: f32,
+    depth_data: Option<Vec<f32>>,
+    depth_range: (f32, f32),
+    depth_spread: f32,
+    base_lines: Vec<f32>,
+}
+
+const WIDTH: f32 = 518.0;
+const HEIGHT: f32 = 392.0;
+
+fn display_z(d: f32, range: (f32, f32), spread: f32) -> f32 {
+    let denom = (range.1 - range.0).max(1e-6);
+    let t = ((d - range.0) / denom).clamp(0.0, 1.0);
+    0.06f32.max(2.0 + spread * (1.0 / (0.45 + 1.55 * t) - 1.0))
+}
+
+fn point_at(x: f32, y: f32, d: f32, range: (f32, f32), spread: f32) -> [f32; 3] {
+    let z = display_z(d, range, spread);
+    let focal = WIDTH / (2.0 * (std::f32::consts::PI / 6.0).tan());
+    [
+        (x - (WIDTH - 1.0) / 2.0) * z / focal,
+        ((HEIGHT - 1.0) / 2.0 - y) * z / focal,
+        2.0 - z,
+    ]
+}
+
+fn depth_from_z(pz: f32, range: (f32, f32), spread: f32) -> Option<f32> {
+    let (lo, hi) = range;
+    if !lo.is_finite() || !hi.is_finite() || hi <= lo {
+        return None;
+    }
+    let term = 1.0 - pz / spread.max(1e-6);
+    let clamped_term = term.clamp(0.4, 2.5);
+    let val = 1.0 / clamped_term;
+    let t = ((val - 0.45) / 1.55).clamp(0.0, 1.0);
+    Some(lo + t * (hi - lo))
+}
+
+fn marching_squares_contour(
+    depth: &[f32],
+    range: (f32, f32),
+    spread: f32,
+    level: f32,
+    step: usize,
+) -> (Vec<f32>, Vec<[f32; 6]>) {
+    let mut lines = Vec::new();
+    let mut segments = Vec::new();
+    let width = 518;
+    let height = 392;
+    let s = step.max(1);
+    let color = [0.2f32, 0.85, 0.95];
+
+    let interp = |val_a: f32, val_b: f32, pos_a: f32, pos_b: f32| -> f32 {
+        let denom = val_b - val_a;
+        let t = if denom.abs() > 1e-6 {
+            ((level - val_a) / denom).clamp(0.0, 1.0)
+        } else {
+            0.5
+        };
+        pos_a + t * (pos_b - pos_a)
+    };
+
+    for y in (0..height - s).step_by(s) {
+        for x in (0..width - s).step_by(s) {
+            let i0 = y * width + x;
+            let i1 = y * width + (x + s);
+            let i2 = (y + s) * width + (x + s);
+            let i3 = (y + s) * width + x;
+
+            let v0 = depth[i0];
+            let v1 = depth[i1];
+            let v2 = depth[i2];
+            let v3 = depth[i3];
+
+            if !v0.is_finite() || !v1.is_finite() || !v2.is_finite() || !v3.is_finite() {
+                continue;
+            }
+            if v0 <= 0.0 || v1 <= 0.0 || v2 <= 0.0 || v3 <= 0.0 {
+                continue;
+            }
+
+            let min_v = v0.min(v1).min(v2).min(v3);
+            let max_v = v0.max(v1).max(v2).max(v3);
+            if level < min_v || level > max_v {
+                continue;
+            }
+
+            let mut mask = 0u8;
+            if v0 >= level { mask |= 1; }
+            if v1 >= level { mask |= 2; }
+            if v2 >= level { mask |= 4; }
+            if v3 >= level { mask |= 8; }
+
+            if mask == 0 || mask == 15 {
+                continue;
+            }
+
+            let edge_pt = |edge: u8| -> (f32, f32) {
+                match edge {
+                    0 => (interp(v0, v1, x as f32, (x + s) as f32), y as f32),
+                    1 => ((x + s) as f32, interp(v1, v2, y as f32, (y + s) as f32)),
+                    2 => (interp(v3, v2, x as f32, (x + s) as f32), (y + s) as f32),
+                    _ => (x as f32, interp(v0, v3, y as f32, (y + s) as f32)),
+                }
+            };
+
+            let line_pairs: &[(u8, u8)] = match mask {
+                1 | 14 => &[(3, 0)],
+                2 | 13 => &[(0, 1)],
+                3 | 12 => &[(3, 1)],
+                4 | 11 => &[(1, 2)],
+                5 => &[(3, 0), (1, 2)],
+                6 | 9 => &[(0, 2)],
+                7 | 8 => &[(3, 2)],
+                10 => &[(0, 1), (2, 3)],
+                _ => &[],
+            };
+
+            for &(e0, e1) in line_pairs {
+                let (px_a, py_a) = edge_pt(e0);
+                let (px_b, py_b) = edge_pt(e1);
+                let p_a = point_at(px_a, py_a, level, range, spread);
+                let p_b = point_at(px_b, py_b, level, range, spread);
+                lines.extend_from_slice(&[
+                    p_a[0], p_a[1], p_a[2], color[0], color[1], color[2],
+                    p_b[0], p_b[1], p_b[2], color[0], color[1], color[2],
+                ]);
+                segments.push([p_a[0], p_a[1], p_a[2], p_b[0], p_b[1], p_b[2]]);
+            }
+        }
+    }
+    (lines, segments)
+}
+
+fn closest_point_on_segments(segments: &[[f32; 6]], point: [f32; 3]) -> Option<[f32; 3]> {
+    if segments.is_empty() {
+        return None;
+    }
+    let [px, py, pz] = point;
+    let mut best_dist_sq = f32::INFINITY;
+    let mut best_pt = None;
+
+    for s in segments {
+        let [ax, ay, az, bx, by, bz] = *s;
+        let dx = bx - ax;
+        let dy = by - ay;
+        let dz = bz - az;
+        let len_sq = dx * dx + dy * dy + dz * dz;
+        let u = if len_sq > 1e-12 {
+            (((px - ax) * dx + (py - ay) * dy + (pz - az) * dz) / len_sq).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let cx = ax + u * dx;
+        let cy = ay + u * dy;
+        let cz = az + u * dz;
+        let dist_sq = (px - cx) * (px - cx) + (py - cy) * (py - cy) + (pz - cz) * (pz - cz);
+        if dist_sq < best_dist_sq {
+            best_dist_sq = dist_sq;
+            best_pt = Some([cx, cy, cz]);
+        }
+    }
+    best_pt
 }
 
 fn format(name: &str) -> Result<wgpu::TextureFormat, JsValue> {
@@ -213,6 +375,10 @@ impl Renderer {
             offset: Vec3::ZERO,
             grab_rotation: Quat::IDENTITY,
             scale: 1.,
+            depth_data: None,
+            depth_range: (0.0, 1.0),
+            depth_spread: 1.0,
+            base_lines: Vec::new(),
         })
     }
 
@@ -287,10 +453,12 @@ impl Renderer {
             });
         for kind in 0..4 {
             let is_point = kind == 0;
+            let _is_line = kind == 1;
             let is_shell = kind == 2;
             let is_hud = kind == 3;
             let rgb_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
             let rgba_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4];
+            let point_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4];
             let pipeline = self
                 .device
                 .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -309,13 +477,15 @@ impl Renderer {
                         entry_point: Some(if is_point { "point" } else if is_shell || is_hud { "shell" } else { "line" }),
                         compilation_options: Default::default(),
                         buffers: &[Some(wgpu::VertexBufferLayout {
-                            array_stride: if is_shell || is_hud { 28 } else { 24 },
+                            array_stride: if is_point { 40 } else if is_shell || is_hud { 28 } else { 24 },
                             step_mode: if is_point {
                                 wgpu::VertexStepMode::Instance
                             } else {
                                 wgpu::VertexStepMode::Vertex
                             },
-                            attributes: if is_shell || is_hud {
+                            attributes: if is_point {
+                                &point_attributes
+                            } else if is_shell || is_hud {
                                 &rgba_attributes
                             } else {
                                 &rgb_attributes
@@ -324,11 +494,11 @@ impl Renderer {
                     },
                     fragment: Some(wgpu::FragmentState {
                         module: &shader,
-                        entry_point: Some(if is_shell || is_hud { "shell_color" } else { "color" }),
+                        entry_point: Some(if is_point { "point_color" } else if is_shell || is_hud { "shell_color" } else { "color" }),
                         compilation_options: Default::default(),
                         targets: &[Some(wgpu::ColorTargetState {
                             format: color,
-                            blend: if is_shell || is_hud { Some(wgpu::BlendState::ALPHA_BLENDING) } else { None },
+                            blend: if is_point || is_shell || is_hud { Some(wgpu::BlendState::ALPHA_BLENDING) } else { None },
                             write_mask: wgpu::ColorWrites::ALL,
                         })],
                     }),
@@ -389,27 +559,46 @@ impl Renderer {
     }
 
     pub fn set_cloud(&mut self, points: &[f32]) -> Result<(), JsValue> {
-        if points.len() % 6 != 0
-            || points.len() > 518 * 392 * 6
-            || !points.iter().all(|x| x.is_finite())
-        {
-            return Err(JsValue::from_str("Invalid cloud vertices"));
-        }
         if points.is_empty() {
             self.cloud = None;
             self.cloud_count = 0;
             return Ok(());
         }
-        self.cloud = Some(
-            self.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("uploaded cloud"),
-                    contents: bytemuck::cast_slice(points),
-                    usage: wgpu::BufferUsages::VERTEX,
-                }),
-        );
-        self.cloud_count = (points.len() / 6) as u32;
-        Ok(())
+        if !points.iter().all(|x| x.is_finite()) {
+            return Err(JsValue::from_str("Invalid cloud vertices"));
+        }
+        if points.len() % 10 == 0 && points.len() <= 518 * 392 * 10 {
+            self.cloud = Some(
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("uploaded cloud"),
+                        contents: bytemuck::cast_slice(points),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    }),
+            );
+            self.cloud_count = (points.len() / 10) as u32;
+            return Ok(());
+        }
+        if points.len() % 6 == 0 && points.len() <= 518 * 392 * 6 {
+            let count = points.len() / 6;
+            let mut expanded = Vec::with_capacity(count * 10);
+            for i in 0..count {
+                let base = i * 6;
+                expanded.extend_from_slice(&points[base..base + 6]);
+                expanded.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);
+            }
+            self.cloud = Some(
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("uploaded cloud"),
+                        contents: bytemuck::cast_slice(&expanded),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    }),
+            );
+            self.cloud_count = count as u32;
+            return Ok(());
+        }
+        Err(JsValue::from_str("Invalid cloud vertices stride; expected 10 or 6 floats per point"))
     }
     pub fn set_lines(&mut self, lines: &[f32]) -> Result<(), JsValue> {
         if lines.len() % 12 != 0
@@ -418,6 +607,7 @@ impl Renderer {
         {
             return Err(JsValue::from_str("Invalid annotation vertices"));
         }
+        self.base_lines = lines.to_vec();
         self.line_count = (lines.len() / 6) as u32;
         self.lines = if lines.is_empty() {
             None
@@ -425,7 +615,7 @@ impl Renderer {
             Some(
                 self.device
                     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("sphere annotations"),
+                        label: Some("uploaded lines"),
                         contents: bytemuck::cast_slice(lines),
                         usage: wgpu::BufferUsages::VERTEX,
                     }),
@@ -511,6 +701,64 @@ impl Renderer {
             if rotation.length_squared() > 0.0001 {
                 self.grab_rotation = rotation.normalize();
             }
+        }
+    }
+
+    pub fn set_depth_map(&mut self, depth: &[f32], min_depth: f32, max_depth: f32, spread: f32) {
+        if depth.len() == 518 * 392 && min_depth.is_finite() && max_depth.is_finite() && max_depth > min_depth {
+            self.depth_data = Some(depth.to_vec());
+            self.depth_range = (min_depth, max_depth);
+            self.depth_spread = if spread.is_finite() && spread > 0.0 { spread } else { 1.0 };
+        }
+    }
+
+    pub fn set_spread(&mut self, spread: f32) {
+        if spread.is_finite() && spread > 0.0 {
+            self.depth_spread = spread;
+        }
+    }
+
+    pub fn update_grab_level_curve(&mut self, mx: f32, my: f32, mz: f32) -> Option<Vec<f32>> {
+        let depth = self.depth_data.as_ref()?;
+        let level = depth_from_z(mz, self.depth_range, self.depth_spread)?;
+        let (contour_lines, segments) = marching_squares_contour(
+            depth,
+            self.depth_range,
+            self.depth_spread,
+            level,
+            2,
+        );
+        let mut combined = self.base_lines.clone();
+        combined.extend_from_slice(&contour_lines);
+        if !combined.is_empty() {
+            self.lines = Some(
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("uploaded lines with level curve"),
+                        contents: bytemuck::cast_slice(&combined),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    }),
+            );
+            self.line_count = (combined.len() / 6) as u32;
+        }
+        let closest = closest_point_on_segments(&segments, [mx, my, mz])?;
+        Some(vec![closest[0], closest[1], closest[2]])
+    }
+
+    pub fn clear_grab_level_curve(&mut self) {
+        if self.base_lines.is_empty() {
+            self.lines = None;
+            self.line_count = 0;
+        } else {
+            self.lines = Some(
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("restored base lines"),
+                        contents: bytemuck::cast_slice(&self.base_lines),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    }),
+            );
+            self.line_count = (self.base_lines.len() / 6) as u32;
         }
     }
 

@@ -4,6 +4,10 @@
   "candidates": 8,
   "input": "relative inverse depth, float32 [height,width]",
   "output": "[8,7]: confidence, y_min, x_min, y_max, x_max, center_depth, depth_scale",
+  "entries": {
+    "main": "candidates [8,7]",
+    "curvature": "grad [392,518,2], rotated [392,518,2,2]"
+  },
   "entry": "main",
   "runtime": "IREE VMVX",
   "sourceRevision": "42094e8616c1e5793741854ec3bdaa59647e2aa9"
