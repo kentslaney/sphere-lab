@@ -497,7 +497,7 @@ impl Renderer {
         });
         let feedback_uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("grab feedback world transform"),
-            size: 128,
+            size: 144,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -517,7 +517,7 @@ impl Renderer {
         });
         let hud_uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("hud view transform"),
-            size: 128,
+            size: 144,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -1099,11 +1099,11 @@ impl Renderer {
         let world_mvp = Mat4::from_cols_slice(projection) * Mat4::from_cols_slice(view);
         uniforms[..16].copy_from_slice(&world_mvp.to_cols_array());
         uniforms[16..32].copy_from_slice(&Mat4::IDENTITY.to_cols_array());
-        self.queue.write_buffer(&self.feedback_uniform, 0, bytemuck::cast_slice(&uniforms[..32]));
+        self.queue.write_buffer(&self.feedback_uniform, 0, bytemuck::cast_slice(&uniforms));
         let hud_mvp = Mat4::from_cols_slice(projection);
         uniforms[..16].copy_from_slice(&hud_mvp.to_cols_array());
         uniforms[16..32].copy_from_slice(&Mat4::IDENTITY.to_cols_array());
-        self.queue.write_buffer(&self.hud_uniform, 0, bytemuck::cast_slice(&uniforms[..32]));
+        self.queue.write_buffer(&self.hud_uniform, 0, bytemuck::cast_slice(&uniforms));
         let color_view = self.attachment(color, layer)?;
         let depth_view = self.attachment(depth, layer)?;
         let mut encoder = self.device.create_command_encoder(&Default::default());
