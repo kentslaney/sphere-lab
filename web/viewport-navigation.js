@@ -2,11 +2,11 @@ const dot = (a, b) => a.reduce((sum, v, i) => sum + v * b[i], 0);
 
 // Choose a near surface inside a 30px diameter cone. Empty regions use the
 // cloud's median visible depth plane so adjacent fallback grabs are consistent.
-export function raycastDistance(points, camera, ray, forward, height, focal) {
+export function raycastDistance(points, camera, ray, forward, height, focal, stride = 6) {
   let hit = Infinity;
   const depths = [];
   const threshold = (30 / (height * focal)) ** 2;
-  for (let i = 0; i < (points?.length ?? 0); i += 6) {
+  for (let i = 0; i < (points?.length ?? 0); i += stride) {
     const p = [points[i] - camera[0], points[i + 1] - camera[1], points[i + 2] - camera[2]];
     const depth = dot(p, forward);
     if (!Number.isFinite(depth) || depth < 0.05 || depth > 100) continue;

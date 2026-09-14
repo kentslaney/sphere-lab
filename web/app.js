@@ -15,22 +15,19 @@ function rebuild(updateCloud=true) {
   if(!depth||!rgba) return;
   const spread=spreadFromSlider($('spread').value), threshold=Number($('threshold').value);
   if(updateCloud) {
-    const cloud=pointCloud(depth,rgba,spread,1,debugMode ? lastRotated : null, debugMode ? lastCenters : null);
+    const cloud=pointCloud(depth,rgba,spread,1,debugMode ? lastRotated : null, lastCenters);
     range=cloud.range;
     cloudVertices=cloud.vertices;
-    bounds=cloudBounds(cloud.vertices);
+    bounds=cloudBounds(cloud.vertices, cloud.stride);
     if(viewer) {
-      viewer.setCloud(cloud.vertices);
+      viewer.setCloud(cloud.vertices, cloud.stride);
       viewer.setDepthMap(depth, range[0], range[1], spread);
       viewer.setSpread(spread);
       if (lastGrad && lastRotated) {
         viewer.setCurvature?.(lastGrad, lastRotated);
       }
     }
-    let stride = 6;
-    if (cloud.vertices.length % 14 === 0 && cloud.vertices.length % 6 !== 0) stride = 14;
-    else if (cloud.vertices.length % 10 === 0 && cloud.vertices.length % 6 !== 0) stride = 10;
-    $('point-count').textContent=`${(cloud.vertices.length/stride).toLocaleString()} POINTS`;
+    $('point-count').textContent=`${(cloud.vertices.length/cloud.stride).toLocaleString()} POINTS`;
   }
   const allLines=[];
   selected=candidates?selectDetections(candidates,threshold):[];
@@ -94,10 +91,8 @@ function startWorker(){
         lastRotated=data.rotated;
         lastCenters=data.centers;
         viewer?.setCurvature?.(lastGrad, lastRotated);
-        if(debugMode) {
-          rebuild(true);
-          updateLines();
-        }
+        rebuild(true);
+        updateLines();
       } else if(data.type==='error'){controls(false);status(data.message,true);if(depth)$('result-heading').textContent='Depth ready · detector did not complete';}
     }catch(error){controls(false);status(error.message,true);}
   };
@@ -130,11 +125,12 @@ async function analyze(blob,name,isExample=false){
   } catch(error){if(currentJob!==job)return;controls(false);status(`Could not analyze this image: ${error.message}. Try a JPEG or PNG.`,true);}
 }
 $('file').addEventListener('change',()=>{const file=$('file').files[0];if(file)analyze(file,file.name);$('file').value='';});
-$('example').addEventListener('click',async()=>{
+async function loadExample(){
   if(busy)return;
   try{const response=await fetch(new URL('./models/example.jpg', import.meta.url));if(!response.ok)throw new Error('Example missing; run sh scripts/build_pipeline.sh');await analyze(await response.blob(),'Example photo',true);}
   catch(error){status(error.message,true);}
-});
+}
+$('example').addEventListener('click',()=>void loadExample());
 $('cancel').addEventListener('click',()=>{++job;worker?.terminate();worker=null;controls(false);for(const el of document.querySelectorAll('.stages .active'))el.classList.remove('active');status('Canceled. Choose another image to start again.');$('result-heading').textContent=depth?'Depth ready · detection canceled':'Canceled';});
 function handlePixelSelect(canvasEl, e) {
   if (!debugMode || !depth || !range) return;
@@ -238,5 +234,6 @@ try {
     showConfig,
   });
   if(depth)rebuild();
+  else void loadExample();
 }
 catch(error){$('viewer-status').textContent=`3D view unavailable: ${error.message}`;}

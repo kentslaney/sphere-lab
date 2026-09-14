@@ -42,7 +42,7 @@ export async function createViewer(canvas, button, status, options = {}) {
     let camPos = [0, 0, 2];
     let yaw = 0, pitch = 0;
     let drag = null;
-    let cloudPoints = null;
+    let cloudPoints = null, cloudStride = 6;
     let worldPoints = null, worldDirty = true;
     let modelOffset = [0, 0, 0], modelScale = 1, modelRotation = [0, 0, 0, 1];
     let debugMode = false;
@@ -407,13 +407,13 @@ export async function createViewer(canvas, button, status, options = {}) {
     function resolveRaycastDistance(rayDir, canvasH, fFov) {
       if (worldDirty) {
         worldPoints = cloudPoints && new Float32Array(cloudPoints.length);
-        for (let i = 0; i < (cloudPoints?.length ?? 0); i += 6) {
+        for (let i = 0; i < (cloudPoints?.length ?? 0); i += cloudStride) {
           const p = rotate(modelRotation, Array.from(cloudPoints.subarray(i, i + 3), v => v * modelScale));
           worldPoints.set(p.map((v, j) => v + modelOffset[j]), i);
         }
         worldDirty = false;
       }
-      return raycastDistance(worldPoints, camPos, rayDir, getCameraVectors().forward, canvasH, fFov);
+      return raycastDistance(worldPoints, camPos, rayDir, getCameraVectors().forward, canvasH, fFov, cloudStride);
     }
 
     const touches = new Map();
@@ -503,9 +503,11 @@ export async function createViewer(canvas, button, status, options = {}) {
     }, { passive: false });
 
     return {
-      setCloud: points => {
-        cloudPoints = points; worldDirty = true; clearPointers();
-        renderer.set_cloud(points);
+      setCloud: (points, stride = null) => {
+        cloudPoints = points;
+        cloudStride = stride || (points && points.length % 14 === 0 && points.length % 6 !== 0 ? 14 : (points && points.length % 10 === 0 && points.length % 6 !== 0 ? 10 : 6));
+        worldDirty = true; clearPointers();
+        renderer.set_cloud(points, cloudStride);
       },
       setLines: lines => renderer.set_lines(lines),
       setHud: vertices => renderer.set_hud(vertices),

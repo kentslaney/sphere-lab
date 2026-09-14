@@ -177,28 +177,26 @@ onmessage=async ({data:{id,type,rgba,depth:provided,debug,isExample}})=>{
       const candidates=runtime.HEAPF32.slice(output/4,output/4+56);
       postMessage({id,type:'result',candidates,elapsed:performance.now()-start},[candidates.buffer]);
 
-      if(debug) {
-        const grad=runtime._malloc(WIDTH*HEIGHT*2*4);
-        const rotated=runtime._malloc(WIDTH*HEIGHT*4*4);
-        const centers=runtime._malloc(WIDTH*HEIGHT*3*4);
-        if(grad && rotated && centers) {
-          try {
-            if(runtime._sphere_run_curvature(input,disparity.length,grad,rotated)===0) {
-              let centersValues = null;
-              if (runtime._sphere_run_centers(input, disparity.length, centers) === 0) {
-                centersValues = runtime.HEAPF32.slice(centers / 4, centers / 4 + WIDTH * HEIGHT * 3);
-              }
-              const gradValues=runtime.HEAPF32.slice(grad/4,grad/4+WIDTH*HEIGHT*2);
-              const rotatedValues=runtime.HEAPF32.slice(rotated/4,rotated/4+WIDTH*HEIGHT*4);
-              const transfer = [gradValues.buffer, rotatedValues.buffer];
-              if (centersValues) transfer.push(centersValues.buffer);
-              postMessage({id,type:'curvature',grad:gradValues,rotated:rotatedValues,centers:centersValues,elapsed:performance.now()-start},transfer);
+      const grad=runtime._malloc(WIDTH*HEIGHT*2*4);
+      const rotated=runtime._malloc(WIDTH*HEIGHT*4*4);
+      const centers=runtime._malloc(WIDTH*HEIGHT*3*4);
+      if(grad && rotated && centers) {
+        try {
+          if(runtime._sphere_run_curvature(input,disparity.length,grad,rotated)===0) {
+            let centersValues = null;
+            if (runtime._sphere_run_centers(input, disparity.length, centers) === 0) {
+              centersValues = runtime.HEAPF32.slice(centers / 4, centers / 4 + WIDTH * HEIGHT * 3);
             }
-          } finally {
-            runtime._free(grad);
-            runtime._free(rotated);
-            runtime._free(centers);
+            const gradValues=runtime.HEAPF32.slice(grad/4,grad/4+WIDTH*HEIGHT*2);
+            const rotatedValues=runtime.HEAPF32.slice(rotated/4,rotated/4+WIDTH*HEIGHT*4);
+            const transfer = [gradValues.buffer, rotatedValues.buffer];
+            if (centersValues) transfer.push(centersValues.buffer);
+            postMessage({id,type:'curvature',grad:gradValues,rotated:rotatedValues,centers:centersValues,elapsed:performance.now()-start},transfer);
           }
+        } finally {
+          runtime._free(grad);
+          runtime._free(rotated);
+          runtime._free(centers);
         }
       }
     } finally {runtime._free(input);runtime._free(output);}

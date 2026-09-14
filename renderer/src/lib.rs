@@ -762,7 +762,7 @@ impl Renderer {
         Ok(())
     }
 
-    pub fn set_cloud(&mut self, points: &[f32]) -> Result<(), JsValue> {
+    pub fn set_cloud(&mut self, points: &[f32], stride: Option<u32>) -> Result<(), JsValue> {
         if points.is_empty() {
             self.cloud = None;
             self.cloud_count = 0;
@@ -771,58 +771,82 @@ impl Renderer {
         if !points.iter().all(|x| x.is_finite()) {
             return Err(JsValue::from_str("Invalid cloud vertices"));
         }
-        if points.len() % 14 == 0 && points.len() <= 518 * 392 * 14 {
-            self.cloud = Some(
-                self.device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("uploaded cloud"),
-                        contents: bytemuck::cast_slice(points),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    }),
-            );
-            self.cloud_count = (points.len() / 14) as u32;
-            return Ok(());
-        }
-        if points.len() % 10 == 0 && points.len() <= 518 * 392 * 10 {
-            let count = points.len() / 10;
-            let mut expanded = Vec::with_capacity(count * 14);
-            for i in 0..count {
-                let base = i * 10;
-                expanded.extend_from_slice(&points[base..base + 10]);
-                expanded.extend_from_slice(&[points[base], points[base + 1], points[base + 2], 0.0]);
+        let effective_stride = stride.unwrap_or_else(|| {
+            if points.len() % 14 == 0 && points.len() / 14 <= 518 * 392 && points.len() % 6 != 0 {
+                14
+            } else if points.len() % 10 == 0 && points.len() / 10 <= 518 * 392 && points.len() % 6 != 0 {
+                10
+            } else if points.len() % 6 == 0 && points.len() / 6 <= 518 * 392 {
+                6
+            } else if points.len() % 14 == 0 {
+                14
+            } else {
+                6
             }
-            self.cloud = Some(
-                self.device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("uploaded cloud"),
-                        contents: bytemuck::cast_slice(&expanded),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    }),
-            );
-            self.cloud_count = count as u32;
-            return Ok(());
-        }
-        if points.len() % 6 == 0 && points.len() <= 518 * 392 * 6 {
-            let count = points.len() / 6;
-            let mut expanded = Vec::with_capacity(count * 14);
-            for i in 0..count {
-                let base = i * 6;
-                expanded.extend_from_slice(&points[base..base + 6]);
-                expanded.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);
-                expanded.extend_from_slice(&[points[base], points[base + 1], points[base + 2], 0.0]);
+        });
+        match effective_stride {
+            14 => {
+                if points.len() % 14 != 0 {
+                    return Err(JsValue::from_str("Points length not divisible by 14"));
+                }
+                self.cloud = Some(
+                    self.device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("uploaded cloud"),
+                            contents: bytemuck::cast_slice(points),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        }),
+                );
+                self.cloud_count = (points.len() / 14) as u32;
+                Ok(())
             }
-            self.cloud = Some(
-                self.device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("uploaded cloud"),
-                        contents: bytemuck::cast_slice(&expanded),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    }),
-            );
-            self.cloud_count = count as u32;
-            return Ok(());
+            10 => {
+                if points.len() % 10 != 0 {
+                    return Err(JsValue::from_str("Points length not divisible by 10"));
+                }
+                let count = points.len() / 10;
+                let mut expanded = Vec::with_capacity(count * 14);
+                for i in 0..count {
+                    let base = i * 10;
+                    expanded.extend_from_slice(&points[base..base + 10]);
+                    expanded.extend_from_slice(&[points[base], points[base + 1], points[base + 2], 0.0]);
+                }
+                self.cloud = Some(
+                    self.device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("uploaded cloud"),
+                            contents: bytemuck::cast_slice(&expanded),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        }),
+                );
+                self.cloud_count = count as u32;
+                Ok(())
+            }
+            6 => {
+                if points.len() % 6 != 0 {
+                    return Err(JsValue::from_str("Points length not divisible by 6"));
+                }
+                let count = points.len() / 6;
+                let mut expanded = Vec::with_capacity(count * 14);
+                for i in 0..count {
+                    let base = i * 6;
+                    expanded.extend_from_slice(&points[base..base + 6]);
+                    expanded.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);
+                    expanded.extend_from_slice(&[points[base], points[base + 1], points[base + 2], 0.0]);
+                }
+                self.cloud = Some(
+                    self.device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("uploaded cloud"),
+                            contents: bytemuck::cast_slice(&expanded),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        }),
+                );
+                self.cloud_count = count as u32;
+                Ok(())
+            }
+            _ => Err(JsValue::from_str("Invalid cloud vertices stride; expected 14, 10 or 6 floats per point")),
         }
-        Err(JsValue::from_str("Invalid cloud vertices stride; expected 14, 10 or 6 floats per point"))
     }
     pub fn set_lines(&mut self, lines: &[f32]) -> Result<(), JsValue> {
         if lines.len() % 12 != 0
@@ -1059,21 +1083,12 @@ impl Renderer {
         if projection.len() != 16 || view.len() != 16 || viewport.len() != 4 {
             return Err(JsValue::from_str("Invalid camera or viewport"));
         }
-        let pipeline = self
-            .pipeline
-            .as_ref()
-            .ok_or_else(|| JsValue::from_str("Set format first"))?;
-        let model = if self.cloud.is_some() {
-            Mat4::from_translation(Vec3::new(0., 0., -self.distance) + self.offset)
-                * Mat4::from_quat(self.grab_rotation)
-                * Mat4::from_rotation_y(self.yaw)
-                * Mat4::from_rotation_x(self.pitch)
-                * Mat4::from_scale(Vec3::splat(self.scale))
-        } else {
-            Mat4::from_translation(Vec3::new(0., 0., -2.))
-                * Mat4::from_rotation_y(seconds * 0.3)
-                * Mat4::from_rotation_x(0.2 + seconds * 0.15)
-        };
+        let _ = seconds;
+        let model = Mat4::from_translation(Vec3::new(0., 0., -self.distance) + self.offset)
+            * Mat4::from_quat(self.grab_rotation)
+            * Mat4::from_rotation_y(self.yaw)
+            * Mat4::from_rotation_x(self.pitch)
+            * Mat4::from_scale(Vec3::splat(self.scale));
         let mvp = Mat4::from_cols_slice(projection) * Mat4::from_cols_slice(view) * model;
         let mut uniforms = [0f32; 36];
         uniforms[..16].copy_from_slice(&mvp.to_cols_array());
@@ -1130,10 +1145,6 @@ impl Renderer {
                     pass.set_vertex_buffer(0, lines.slice(..));
                     pass.draw(0..self.line_count, 0..1);
                 }
-            } else {
-                pass.set_pipeline(pipeline);
-                pass.set_vertex_buffer(0, self.vertices.slice(..));
-                pass.draw(0..self.vertex_count, 0..1);
             }
             if self.feedback_count > 0 {
                 pass.set_bind_group(0, &self.feedback_bind, &[]);

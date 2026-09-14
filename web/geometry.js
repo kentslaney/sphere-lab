@@ -81,6 +81,9 @@ export function pointCloud(depth, rgba, spread = 1, step = 1, rotated = null, ce
   const range = depthRange(depth), data = [];
   const hasRot = rotated && rotated.length === WIDTH * HEIGHT * 4;
   const hasCent = centers && centers.length === WIDTH * HEIGHT * 3;
+  let stride = 6;
+  if (hasCent) stride = 14;
+  else if (hasRot) stride = 10;
   for (let y = 0; y < HEIGHT; y += step) for (let x = 0; x < WIDTH; x += step) {
     const i = y * WIDTH + x, d = depth[i];
     if (!Number.isFinite(d) || d <= 0) continue;
@@ -101,7 +104,7 @@ export function pointCloud(depth, rgba, spread = 1, step = 1, rotated = null, ce
       data.push(...pt, r, g, b);
     }
   }
-  return { vertices: new Float32Array(data), range };
+  return { vertices: new Float32Array(data), range, stride };
 }
 export function selectDetections(raw, threshold = 0.1, iouThreshold = 0.75) {
   const candidates = [];
@@ -584,17 +587,20 @@ export function centerEstimateAt(closestPoint, level, grad, rotated, range, spre
   return { xc, yc, zc, center3D, isConvex: true };
 }
 
-export function cloudBounds(vertices) {
+export function cloudBounds(vertices, stride = null) {
   if (!vertices || vertices.length < 6) {
     return { minX: -0.5, maxX: 0.5, minY: -0.5, maxY: 0.5, minZ: -0.5, maxZ: 0.5 };
   }
-  let stride = 6;
-  if (vertices.length % 14 === 0 && vertices.length % 6 !== 0) stride = 14;
-  else if (vertices.length % 10 === 0 && vertices.length % 6 !== 0) stride = 10;
+  let s = stride;
+  if (!s) {
+    if (vertices.length % 14 === 0 && vertices.length % 6 !== 0) s = 14;
+    else if (vertices.length % 10 === 0 && vertices.length % 6 !== 0) s = 10;
+    else s = 6;
+  }
   let minX = Infinity, maxX = -Infinity;
   let minY = Infinity, maxY = -Infinity;
   let minZ = Infinity, maxZ = -Infinity;
-  for (let i = 0; i < vertices.length; i += stride) {
+  for (let i = 0; i < vertices.length; i += s) {
     const x = vertices[i], y = vertices[i+1], z = vertices[i+2];
     if (x < minX) minX = x;
     if (x > maxX) maxX = x;
