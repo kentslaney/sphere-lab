@@ -1,6 +1,6 @@
 import {loadCachedDepth} from './model-cache.js';
 import * as ort from './vendor/onnxruntime/ort.webgpu.min.mjs';
-import {WIDTH,HEIGHT,normalizeImage,resizeDepth} from './geometry.js';
+import {WIDTH,HEIGHT,normalizeImage,resizeDepth,parseFloat32Tiff} from './geometry.js';
 let depthSession, runtime, graphPointer;
 let depthModelBytes = null;
 let depthProvider = 'webgpu';
@@ -65,7 +65,7 @@ async function loadDetector(id) {
   runtime=loaded;graphPointer=ptr;
 }
 let busy=false;
-onmessage=async ({data:{id,type,rgba,depth:provided,debug}})=>{
+onmessage=async ({data:{id,type,rgba,depth:provided,debug,isExample}})=>{
   if(busy){postMessage({id,type:'error',message:'Inference is already running.'});return;}
   busy=true;
   try {
@@ -100,35 +100,56 @@ onmessage=async ({data:{id,type,rgba,depth:provided,debug}})=>{
     }
     let depth=provided;
     if(type==='infer') {
-      await loadDepth(id);
-      progress(id,'depth',depthProvider==='webgpu' ? 'Estimating depth on WebGPU…' : 'Estimating depth on CPU (WASM)…');
-      const start=performance.now();
-      const input=new ort.Tensor('float32',normalizeImage(rgba),[1,3,HEIGHT,WIDTH]);
-      let outputs;
-      try {
+      let cached=false;
+      if(isExample) {
         try {
-          outputs=await depthSession.run({[depthSession.inputNames[0]]:input});
-        } catch(runError) {
-          if(depthProvider==='webgpu' && depthModelBytes) {
-            console.warn('Depth inference failed on WebGPU, falling back to WASM:', runError);
-            progress(id,'depth','WebGPU memory limit hit. Retrying on CPU (WASM)…');
-            try { depthSession?.release?.(); } catch(_) {}
-            depthSession = await ort.InferenceSession.create(depthModelBytes,{executionProviders:['wasm'],graphOptimizationLevel:'all'});
-            depthProvider = 'wasm';
-            outputs=await depthSession.run({[depthSession.inputNames[0]]:input});
-          } else {
-            throw runError;
+          progress(id,'depth','Loading cached depth for example image…');
+          const start=performance.now();
+          const tiffUrl=new URL('./models/example-disparity.tiff',import.meta.url);
+          const res=await fetch(tiffUrl);
+          if(res.ok) {
+            const buf=await res.arrayBuffer();
+            const parsed=parseFloat32Tiff(new Uint8Array(buf));
+            for(let i=0;i<parsed.length;i++) if(parsed[i]===0)parsed[i]=1e-6;
+            depth=parsed;
+            cached=true;
+            postMessage({id,type:'depth',depth,elapsed:performance.now()-start});
           }
+        } catch(cacheErr) {
+          console.warn('Could not load example depth cache, falling back to model:', cacheErr);
         }
-        const result=outputs[depthSession.outputNames[0]];
-        const values=await result.getData();
-        const [h,w]=result.dims.slice(-2);
-        depth=resizeDepth(values,w,h);
-        // DA2's ReLU may produce zero at the farthest pixels. Keep positive
-        // inverse depth for the detector's reciprocal, without rescaling it.
-        for(let i=0;i<depth.length;i++) if(depth[i]===0)depth[i]=1e-6;
-      } finally { input.dispose();if(outputs) Object.values(outputs).forEach(t=>t.dispose()); }
-      postMessage({id,type:'depth',depth,elapsed:performance.now()-start});
+      }
+      if(!cached) {
+        await loadDepth(id);
+        progress(id,'depth',depthProvider==='webgpu' ? 'Estimating depth on WebGPU…' : 'Estimating depth on CPU (WASM)…');
+        const start=performance.now();
+        const input=new ort.Tensor('float32',normalizeImage(rgba),[1,3,HEIGHT,WIDTH]);
+        let outputs;
+        try {
+          try {
+            outputs=await depthSession.run({[depthSession.inputNames[0]]:input});
+          } catch(runError) {
+            if(depthProvider==='webgpu' && depthModelBytes) {
+              console.warn('Depth inference failed on WebGPU, falling back to WASM:', runError);
+              progress(id,'depth','WebGPU memory limit hit. Retrying on CPU (WASM)…');
+              try { depthSession?.release?.(); } catch(_) {}
+              depthSession = await ort.InferenceSession.create(depthModelBytes,{executionProviders:['wasm'],graphOptimizationLevel:'all'});
+              depthProvider = 'wasm';
+              outputs=await depthSession.run({[depthSession.inputNames[0]]:input});
+            } else {
+              throw runError;
+            }
+          }
+          const result=outputs[depthSession.outputNames[0]];
+          const values=await result.getData();
+          const [h,w]=result.dims.slice(-2);
+          depth=resizeDepth(values,w,h);
+          // DA2's ReLU may produce zero at the farthest pixels. Keep positive
+          // inverse depth for the detector's reciprocal, without rescaling it.
+          for(let i=0;i<depth.length;i++) if(depth[i]===0)depth[i]=1e-6;
+        } finally { input.dispose();if(outputs) Object.values(outputs).forEach(t=>t.dispose()); }
+        postMessage({id,type:'depth',depth,elapsed:performance.now()-start});
+      }
     }
     if(!(depth instanceof Float32Array)||depth.length!==WIDTH*HEIGHT) throw new Error('Detector requires a 392×518 float32 depth map.');
     // The graph itself converts inverse depth to depth; do not invert it here.

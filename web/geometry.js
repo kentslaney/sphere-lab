@@ -27,6 +27,38 @@ export function resizeDepth(input, width, height, outWidth = WIDTH, outHeight = 
   return out;
 }
 
+export function parseFloat32Tiff(buffer) {
+  if (!buffer) throw new Error('Buffer is empty');
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  if (bytes.length < 8) throw new Error('Invalid TIFF header length');
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const isLE = view.getUint16(0) === 0x4949; // 'II'
+  const magic = view.getUint16(2, isLE);
+  if (magic !== 42) throw new Error('Not a valid TIFF');
+  const ifdOffset = view.getUint32(4, isLE);
+  if (ifdOffset + 2 > bytes.length) throw new Error('Invalid IFD offset');
+  const numEntries = view.getUint16(ifdOffset, isLE);
+  let width = 0, height = 0, stripOffset = 0;
+  for (let i = 0; i < numEntries; i++) {
+    const entryOffset = ifdOffset + 2 + i * 12;
+    if (entryOffset + 12 > bytes.length) break;
+    const tag = view.getUint16(entryOffset, isLE);
+    const type = view.getUint16(entryOffset + 2, isLE);
+    const count = view.getUint32(entryOffset + 4, isLE);
+    const val = (type === 3 && count === 1) ? view.getUint16(entryOffset + 8, isLE) : view.getUint32(entryOffset + 8, isLE);
+    if (tag === 256) width = val;
+    else if (tag === 257) height = val;
+    else if (tag === 273) stripOffset = val;
+  }
+  if (!width || !height || !stripOffset || stripOffset + width * height * 4 > bytes.length) {
+    throw new Error('Incomplete TIFF metadata or buffer overflow');
+  }
+  const floats = new Float32Array(width * height);
+  const rawBytes = new Uint8Array(bytes.buffer, bytes.byteOffset + stripOffset, width * height * 4);
+  new Uint8Array(floats.buffer).set(rawBytes);
+  return floats;
+}
+
 export function depthRange(depth) {
   const valid = Array.from(depth).filter(v => Number.isFinite(v) && v>0).sort((a,b)=>a-b);
   if (valid.length < depth.length * 0.9) throw new Error('Depth model returned too many invalid samples.');

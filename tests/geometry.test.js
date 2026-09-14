@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {sphereLines,depthLevelCurves,depthFromZ,depthLevelCurveAt,closestPointOnSegments,smallSphereLines,grabLevelCurveLines,curvatureVectorLines,normalizeImage,resizeDepth,selectDetections,pointCloud,pointAt,displayZ,WIDTH,HEIGHT,cloudBounds,computeViewportPinchScale} from '../web/geometry.js';
+import {sphereLines,depthLevelCurves,depthFromZ,depthLevelCurveAt,closestPointOnSegments,smallSphereLines,grabLevelCurveLines,curvatureVectorLines,parseFloat32Tiff,normalizeImage,resizeDepth,selectDetections,pointCloud,pointAt,displayZ,WIDTH,HEIGHT,cloudBounds,computeViewportPinchScale} from '../web/geometry.js';
+import {readFile} from 'node:fs/promises';
 test('RGB normalization is NCHW and uses ImageNet values',()=>{
   const out=normalizeImage(new Uint8ClampedArray([255,0,128,255,0,255,0,255]),2,1);
   assert.equal(out.length,6);
@@ -277,5 +278,24 @@ test('curvatureVectorLines plots normalized gradient direction and rotated diago
   assert.ok(baseLines.length > 0);
   const withCurvature = grabLevelCurveLines(depthField, range, 1, [closestPoint], grad, rotated);
   assert.equal(withCurvature.length, baseLines.length + 72);
+});
+
+test('parseFloat32Tiff correctly decodes 32-bit float grayscale TIFF depth and disparity cache', async () => {
+  const depthBuffer = await readFile(new URL('../models/example-depth.tiff', import.meta.url));
+  const disparityBuffer = await readFile(new URL('../models/example-disparity.tiff', import.meta.url));
+
+  const depthFloats = parseFloat32Tiff(depthBuffer);
+  const disparityFloats = parseFloat32Tiff(disparityBuffer);
+
+  assert.equal(depthFloats.length, WIDTH * HEIGHT);
+  assert.equal(disparityFloats.length, WIDTH * HEIGHT);
+
+  assert.ok(depthFloats.every(v => Number.isFinite(v) && v > 0));
+  assert.ok(disparityFloats.every(v => Number.isFinite(v) && v > 0));
+
+  // Verify reciprocity: disparity ≈ 1 / depth
+  for (let i = 0; i < 100; i++) {
+    assert.ok(Math.abs(depthFloats[i] * disparityFloats[i] - 1.0) < 1e-4);
+  }
 });
 

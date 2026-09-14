@@ -100,7 +100,7 @@ function startWorker(){
   };
   worker.onerror=event=>{controls(false);status(event.message||'Inference worker failed. Reload to retry.',true);worker?.terminate();worker=null;};
 }
-async function analyze(blob,name){
+async function analyze(blob,name,isExample=false){
   if(busy) return;
   controls(true);const currentJob=++job;
   sourceName=name;rgba=null;depth=null;candidates=null;selected=[];bounds=null;cloudVertices=null;
@@ -122,13 +122,14 @@ async function analyze(blob,name){
     rgba=photo.getImageData(0,0,WIDTH,HEIGHT).data;
     lastGrad=null;lastRotated=null;
     $('filename').textContent=`${name} · center crop ${WIDTH} × ${HEIGHT} · processed locally`;
-    stage('depth','active');startWorker();worker.postMessage({id:currentJob,type:'infer',rgba,debug:debugMode});
+    const isExampleImage = isExample || name === 'Example photo' || name === 'example.jpg';
+    stage('depth','active');startWorker();worker.postMessage({id:currentJob,type:'infer',rgba,debug:debugMode,isExample:isExampleImage});
   } catch(error){if(currentJob!==job)return;controls(false);status(`Could not analyze this image: ${error.message}. Try a JPEG or PNG.`,true);}
 }
 $('file').addEventListener('change',()=>{const file=$('file').files[0];if(file)analyze(file,file.name);$('file').value='';});
 $('example').addEventListener('click',async()=>{
   if(busy)return;
-  try{const response=await fetch(new URL('./models/example.jpg', import.meta.url));if(!response.ok)throw new Error('Example missing; run sh scripts/build_pipeline.sh');await analyze(await response.blob(),'Example photo');}
+  try{const response=await fetch(new URL('./models/example.jpg', import.meta.url));if(!response.ok)throw new Error('Example missing; run sh scripts/build_pipeline.sh');await analyze(await response.blob(),'Example photo',true);}
   catch(error){status(error.message,true);}
 });
 $('cancel').addEventListener('click',()=>{++job;worker?.terminate();worker=null;controls(false);for(const el of document.querySelectorAll('.stages .active'))el.classList.remove('active');status('Canceled. Choose another image to start again.');$('result-heading').textContent=depth?'Depth ready · detection canceled':'Canceled';});
