@@ -65,77 +65,76 @@ export function depthRange(depth) {
   return [valid[Math.floor(valid.length*0.02)],valid[Math.floor(valid.length*0.98)]];
 }
 
-// Relative inverse depth becomes a bounded display distance, not metric depth.
-export function displayZ(d, range, spread=1) {
-  const t = Math.max(0, Math.min(1,(d-range[0])/Math.max(1e-6,range[1]-range[0])));
-  // At 4× the nearest depths would collapse to zero; retain a positive
-  // distance just beyond the preview camera's near plane.
-  return Math.max(0.06, 2 + spread * (1/(0.45+1.55*t)-1));
+// Linear depth mapping to bounded display distance.
+export function displayZ(z, range, spread = 1) {
+  const t = Math.max(0, Math.min(1, (z - range[0]) / Math.max(1e-6, range[1] - range[0])));
+  // At 4× spread, nearest samples remain positive and in front of camera.
+  return Math.max(0.06, 2 + spread * (-0.5 + 1.72 * t));
 }
-export function pointAt(x,y,d,range,spread=1) {
-  const z=displayZ(d,range,spread);
-  const focal = WIDTH/(2*Math.tan(Math.PI/6)); // assumed 60° horizontal field of view
-  return [(x-(WIDTH-1)/2)*z/focal, ((HEIGHT-1)/2-y)*z/focal, 2-z];
+export function pointAt(x, y, z_val, range, spread = 1) {
+  const z = displayZ(z_val, range, spread);
+  const focal = WIDTH / (2 * Math.tan(Math.PI / 6)); // assumed 60° horizontal field of view
+  return [(x - (WIDTH - 1) / 2) * z / focal, ((HEIGHT - 1) / 2 - y) * z / focal, 2 - z];
 }
-export function pointCloud(depth,rgba,spread=1,step=1,rotated=null) {
-  if (depth.length!==WIDTH*HEIGHT || rgba.length!==WIDTH*HEIGHT*4) throw new Error('Invalid point cloud input.');
-  const range=depthRange(depth), data=[];
+export function pointCloud(depth, rgba, spread = 1, step = 1, rotated = null) {
+  if (depth.length !== WIDTH * HEIGHT || rgba.length !== WIDTH * HEIGHT * 4) throw new Error('Invalid point cloud input.');
+  const range = depthRange(depth), data = [];
   const hasRot = rotated && rotated.length === WIDTH * HEIGHT * 4;
-  for (let y=0;y<HEIGHT;y+=step) for (let x=0;x<WIDTH;x+=step) {
-    const i=y*WIDTH+x,d=depth[i];
-    if (!Number.isFinite(d)||d<=0) continue;
-    const pt = pointAt(x,y,d,range,spread);
-    const r = rgba[i*4]/255, g = rgba[i*4+1]/255, b = rgba[i*4+2]/255;
+  for (let y = 0; y < HEIGHT; y += step) for (let x = 0; x < WIDTH; x += step) {
+    const i = y * WIDTH + x, d = depth[i];
+    if (!Number.isFinite(d) || d <= 0) continue;
+    const pt = pointAt(x, y, d, range, spread);
+    const r = rgba[i * 4] / 255, g = rgba[i * 4 + 1] / 255, b = rgba[i * 4 + 2] / 255;
     if (hasRot) {
       const ri = i * 4;
-      data.push(...pt, r, g, b, rotated[ri], rotated[ri+1], rotated[ri+2], rotated[ri+3]);
+      data.push(...pt, r, g, b, rotated[ri], rotated[ri + 1], rotated[ri + 2], rotated[ri + 3]);
     } else {
       data.push(...pt, r, g, b);
     }
   }
-  return {vertices:new Float32Array(data),range};
+  return { vertices: new Float32Array(data), range };
 }
-export function selectDetections(raw, threshold=0.1, iouThreshold=0.75) {
-  const candidates=[];
-  for(let i=0;i<raw.length;i+=7) {
-    const [score,y0,x0,y1,x1,centerDepth,depthScale]=raw.slice(i,i+7);
-    if (![score,y0,x0,y1,x1].every(Number.isFinite)||score<threshold||y1<=y0||x1<=x0) continue;
+export function selectDetections(raw, threshold = 0.1, iouThreshold = 0.75) {
+  const candidates = [];
+  for (let i = 0; i < raw.length; i += 7) {
+    const [score, y0, x0, y1, x1, centerDepth, depthScale] = raw.slice(i, i + 7);
+    if (![score, y0, x0, y1, x1].every(Number.isFinite) || score < threshold || y1 <= y0 || x1 <= x0) continue;
     // Invalid or wholly outside candidates are not useful detections.
-    if(x1<0||y1<0||x0>=WIDTH||y0>=HEIGHT) continue;
-    candidates.push({id:i/7,score,x0,y0,x1,y1,centerDepth,depthScale});
+    if (x1 < 0 || y1 < 0 || x0 >= WIDTH || y0 >= HEIGHT) continue;
+    candidates.push({ id: i / 7, score, x0, y0, x1, y1, centerDepth, depthScale });
   }
-  candidates.sort((a,b)=>b.score-a.score);
-  const kept=[];
-  for(const a of candidates) {
-    if(kept.some(b=>{
-      const intersection=Math.max(0,Math.min(a.x1,b.x1)-Math.max(a.x0,b.x0))*Math.max(0,Math.min(a.y1,b.y1)-Math.max(a.y0,b.y0));
-      return intersection/((a.x1-a.x0)*(a.y1-a.y0)+(b.x1-b.x0)*(b.y1-b.y0)-intersection)>iouThreshold;
+  candidates.sort((a, b) => b.score - a.score);
+  const kept = [];
+  for (const a of candidates) {
+    if (kept.some(b => {
+      const intersection = Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
+      return intersection / ((a.x1 - a.x0) * (a.y1 - a.y0) + (b.x1 - b.x0) * (b.y1 - b.y0) - intersection) > iouThreshold;
     })) continue;
     kept.push(a);
   }
   return kept;
 }
-export function sphereLines(detections,depth,range,spread=1) {
-  const out=[];
-  for(const d of detections) {
-    const x=(d.x0+d.x1)/2,y=(d.y0+d.y1)/2;
-    const {centerDepth,depthScale}=d;
-    if(!Number.isFinite(centerDepth)||centerDepth<=0||!Number.isFinite(depthScale)||depthScale<=0) continue;
-    const radius=((d.x1-d.x0)+(d.y1-d.y0))/4;
+export function sphereLines(detections, depth, range, spread = 1) {
+  const out = [];
+  for (const d of detections) {
+    const x = (d.x0 + d.x1) / 2, y = (d.y0 + d.y1) / 2;
+    const { centerDepth, depthScale } = d;
+    if (!Number.isFinite(centerDepth) || centerDepth <= 0 || !Number.isFinite(depthScale) || depthScale <= 0) continue;
+    const radius = ((d.x1 - d.x0) + (d.y1 - d.y0)) / 4;
     // Match the radial sampling offset in Surface.surface. The RMSE also
     // applies a skew correction; these outlines show the base fitted profile.
-    const offset=-(Math.sqrt(2)+Math.log(1+Math.sqrt(2)))/4;
-    const fittedRadius=radius-offset;
-    const point=(axis,a)=>{
-      const p=[0,0,0];p[(axis+1)%3]=Math.cos(a);p[(axis+2)%3]=Math.sin(a);
-      const rho=radius*Math.hypot(p[0],p[1]);
-      const dz=Math.sign(p[2])*Math.sqrt(Math.max(0,fittedRadius**2-(rho-offset)**2))/depthScale;
-      const z=centerDepth+dz;
-      return z>0 ? pointAt(x+radius*p[0],y+radius*p[1],1/z,range,spread) : null;
+    const offset = -(Math.sqrt(2) + Math.log(1 + Math.sqrt(2))) / 4;
+    const fittedRadius = radius - offset;
+    const point = (axis, a) => {
+      const p = [0, 0, 0]; p[(axis + 1) % 3] = Math.cos(a); p[(axis + 2) % 3] = Math.sin(a);
+      const rho = radius * Math.hypot(p[0], p[1]);
+      const dz = Math.sign(p[2]) * Math.sqrt(Math.max(0, fittedRadius ** 2 - (rho - offset) ** 2)) / depthScale;
+      const z = centerDepth + dz;
+      return z > 0 ? pointAt(x + radius * p[0], y + radius * p[1], z, range, spread) : null;
     };
-    for(let axis=0;axis<3;axis++) for(let i=0;i<64;i++) {
-      const a=point(axis,i/64*Math.PI*2),b=point(axis,(i+1)/64*Math.PI*2);
-      if(a&&b) out.push(...a,1,0.7,0.2,...b,1,0.7,0.2);
+    for (let axis = 0; axis < 3; axis++) for (let i = 0; i < 64; i++) {
+      const a = point(axis, i / 64 * Math.PI * 2), b = point(axis, (i + 1) / 64 * Math.PI * 2);
+      if (a && b) out.push(...a, 1, 0.7, 0.2, ...b, 1, 0.7, 0.2);
     }
   }
   return new Float32Array(out);
@@ -224,10 +223,7 @@ export function depthFromZ(pz, range, spread = 1) {
   if (!range || range.length < 2) return null;
   const [lo, hi] = range;
   if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return null;
-  const term = 1 - pz / Math.max(1e-6, spread);
-  const clampedTerm = Math.max(0.4, Math.min(2.5, term));
-  const val = 1 / clampedTerm;
-  const t = Math.max(0, Math.min(1, (val - 0.45) / 1.55));
+  const t = Math.max(0, Math.min(1, (0.5 - pz / Math.max(1e-6, spread)) / 1.72));
   return lo + t * (hi - lo);
 }
 

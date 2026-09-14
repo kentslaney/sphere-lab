@@ -17,8 +17,8 @@ test('NMS removes overlapping duplicates, invalid candidates, and low scores',()
   const raw=new Float32Array([.9,10,20,30,40,3,80,.8,11,21,31,41,3,80,.7,80,90,100,110,3,80,.01,1,1,2,2,3,80,NaN,1,1,2,2,3,80]);
   const out=selectDetections(raw,.1,.5);assert.deepEqual(out.map(d=>d.id),[0,2]);
 });
-test('larger inverse depth places a point nearer and projection centers correctly',()=>{
-  assert.ok(displayZ(10,[1,10])<displayZ(1,[1,10]));
+test('smaller depth places a point nearer and projection centers correctly',()=>{
+  assert.ok(displayZ(1,[1,10])<displayZ(10,[1,10]));
   const p=pointAt((WIDTH-1)/2,(HEIGHT-1)/2,5,[1,10]);assert.equal(p[0],0);assert.equal(p[1],0);
 });
 test('point cloud skips invalid values and retains normalized colors',()=>{
@@ -47,17 +47,17 @@ test('point cloud includes 4 rotated floats when curvature is provided',()=>{
 
 test('fitted outlines use exported depth geometry rather than center-pixel depth',()=>{
   const detection={x0:194,y0:131,x1:324,y1:261,centerDepth:3,depthScale:80};
-  const range=[0.2,0.5];
+  const range=[2.0,4.0];
   const lines=sphereLines([detection],new Float32Array(WIDTH*HEIGHT).fill(NaN),range);
   assert.equal(lines.length,3*64*2*6);
   assert.ok(lines.every(Number.isFinite));
-  const equator=pointAt(324,196,1/3,range);
+  const equator=pointAt(324,196,3,range);
   // Third great circle starts on the image's positive x axis.
   const start=2*64*2*6;
   for(let i=0;i<3;i++) assert.ok(Math.abs(lines[start+i]-equator[i])<1e-6);
   const offset=-(Math.sqrt(2)+Math.log(1+Math.sqrt(2)))/4;
   const apexDepth=3-Math.sqrt((65-offset)**2-offset**2)/80;
-  const apex=pointAt(259,196,1/apexDepth,range);
+  const apex=pointAt(259,196,apexDepth,range);
   const apexStart=48*2*6; // negative depth pole of the first meridian
   for(let i=0;i<3;i++) assert.ok(Math.abs(lines[apexStart+i]-apex[i])<1e-6);
   assert.notDeepEqual(lines,sphereLines([{...detection,depthScale:40}],null,range));
@@ -110,11 +110,28 @@ test('computeViewportPinchScale calculates average depth and scales with camera 
 });
 
 test('maximum depth spread keeps near samples in front of the camera without collapsing to a point', () => {
-  assert.equal(displayZ(10, [1,10], 4), 0.06);
-  const point = pointAt(0,0,10,[1,10],4);
+  assert.equal(displayZ(1, [1, 10], 4), 0.06);
+  const point = pointAt(0, 0, 1, [1, 10], 4);
   assert.ok(point.every(Number.isFinite));
   assert.ok(point[0] < 0); assert.ok(point[1] > 0);
   assert.ok(2 - point[2] > 0.05);
+});
+
+test('sphere wireframe is symmetric along the depth axis (not egg-shaped)', () => {
+  const detection = { x0: 194, y0: 131, x1: 324, y1: 261, centerDepth: 3, depthScale: 80 };
+  const range = [1.5, 4.5];
+  const lines = sphereLines([detection], null, range);
+  const center = pointAt(259, 196, 3, range);
+  // Meridian 0 (axis 0): step 16 (p[2] = 1, near pole) and step 48 (p[2] = -1, far pole)
+  const nearIdx = 16 * 2 * 6;
+  const farIdx = 48 * 2 * 6;
+  const nearZ = lines[nearIdx + 2];
+  const farZ = lines[farIdx + 2];
+  const centerZ = center[2];
+  const deltaNear = Math.abs(nearZ - centerZ);
+  const deltaFar = Math.abs(farZ - centerZ);
+  assert.ok(deltaNear > 0.1);
+  assert.ok(Math.abs(deltaNear - deltaFar) < 1e-6, `near ${deltaNear} vs far ${deltaFar}`);
 });
 
 test('depthLevelCurves generates valid 3D isocontour line segments', () => {

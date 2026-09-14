@@ -85,13 +85,14 @@ onmessage=async ({data:{id,type,rgba,depth:provided,debug,isExample}})=>{
         if(rotated) runtime._free(rotated);
         throw new Error('Curvature memory allocation failed.');
       }
-      try {
-        runtime.HEAPF32.set(depth,input/4);
-        if(runtime._sphere_run_curvature(input,depth.length,grad,rotated)) throw new Error(runtime.UTF8ToString(runtime._sphere_error()));
-        const gradValues=runtime.HEAPF32.slice(grad/4,grad/4+WIDTH*HEIGHT*2);
-        const rotatedValues=runtime.HEAPF32.slice(rotated/4,rotated/4+WIDTH*HEIGHT*4);
-        postMessage({id,type:'curvature',grad:gradValues,rotated:rotatedValues,elapsed:performance.now()-start},[gradValues.buffer,rotatedValues.buffer]);
-        return;
+      const disparity = new Float32Array(depth.length);
+      for (let i = 0; i < depth.length; i++) disparity[i] = 1.0 / Math.max(1e-6, depth[i]);
+      runtime.HEAPF32.set(disparity, input / 4);
+      if (runtime._sphere_run_curvature(input, disparity.length, grad, rotated)) throw new Error(runtime.UTF8ToString(runtime._sphere_error()));
+      const gradValues = runtime.HEAPF32.slice(grad / 4, grad / 4 + WIDTH * HEIGHT * 2);
+      const rotatedValues = runtime.HEAPF32.slice(rotated / 4, rotated / 4 + WIDTH * HEIGHT * 4);
+      postMessage({ id, type: 'curvature', grad: gradValues, rotated: rotatedValues, elapsed: performance.now() - start }, [gradValues.buffer, rotatedValues.buffer]);
+      return;
       } finally {
         runtime._free(input);
         runtime._free(grad);
@@ -105,12 +106,12 @@ onmessage=async ({data:{id,type,rgba,depth:provided,debug,isExample}})=>{
         try {
           progress(id,'depth','Loading cached depth for example image…');
           const start=performance.now();
-          const tiffUrl=new URL('./models/example-disparity.tiff',import.meta.url);
+          const tiffUrl=new URL('./models/example-depth.tiff',import.meta.url);
           const res=await fetch(tiffUrl);
           if(res.ok) {
             const buf=await res.arrayBuffer();
             const parsed=parseFloat32Tiff(new Uint8Array(buf));
-            for(let i=0;i<parsed.length;i++) if(parsed[i]===0)parsed[i]=1e-6;
+            for(let i=0;i<parsed.length;i++) if(parsed[i]<=0)parsed[i]=1e-6;
             depth=parsed;
             cached=true;
             postMessage({id,type:'depth',depth,elapsed:performance.now()-start});
@@ -143,16 +144,15 @@ onmessage=async ({data:{id,type,rgba,depth:provided,debug,isExample}})=>{
           const result=outputs[depthSession.outputNames[0]];
           const values=await result.getData();
           const [h,w]=result.dims.slice(-2);
-          depth=resizeDepth(values,w,h);
-          // DA2's ReLU may produce zero at the farthest pixels. Keep positive
-          // inverse depth for the detector's reciprocal, without rescaling it.
-          for(let i=0;i<depth.length;i++) if(depth[i]===0)depth[i]=1e-6;
+          const disp=resizeDepth(values,w,h);
+          depth = new Float32Array(disp.length);
+          for(let i=0;i<disp.length;i++) depth[i] = 1.0 / Math.max(1e-6, disp[i]);
         } finally { input.dispose();if(outputs) Object.values(outputs).forEach(t=>t.dispose()); }
         postMessage({id,type:'depth',depth,elapsed:performance.now()-start});
       }
     }
     if(!(depth instanceof Float32Array)||depth.length!==WIDTH*HEIGHT) throw new Error('Detector requires a 392×518 float32 depth map.');
-    // The graph itself converts inverse depth to depth; do not invert it here.
+    // The graph itself converts inverse depth to depth; compute disparity for detector.
     if(!depth.every(x=>Number.isFinite(x)&&x>0)) throw new Error('Depth contains invalid or zero values; detection cannot run reliably.');
     await loadDetector(id);
     progress(id,'detecting','Running sphere-detector graph on Wasm CPU…');
@@ -160,8 +160,10 @@ onmessage=async ({data:{id,type,rgba,depth:provided,debug,isExample}})=>{
     const input=runtime._malloc(depth.byteLength),output=runtime._malloc(56*4);
     if(!input||!output){if(input)runtime._free(input);if(output)runtime._free(output);throw new Error('Detector memory allocation failed.');}
     try {
-      runtime.HEAPF32.set(depth,input/4);
-      if(runtime._sphere_run(input,depth.length,output)) throw new Error(runtime.UTF8ToString(runtime._sphere_error()));
+      const disparity = new Float32Array(depth.length);
+      for (let i = 0; i < depth.length; i++) disparity[i] = 1.0 / Math.max(1e-6, depth[i]);
+      runtime.HEAPF32.set(disparity,input/4);
+      if(runtime._sphere_run(input,disparity.length,output)) throw new Error(runtime.UTF8ToString(runtime._sphere_error()));
       const candidates=runtime.HEAPF32.slice(output/4,output/4+56);
       postMessage({id,type:'result',candidates,elapsed:performance.now()-start},[candidates.buffer]);
 
@@ -170,7 +172,7 @@ onmessage=async ({data:{id,type,rgba,depth:provided,debug,isExample}})=>{
         const rotated=runtime._malloc(WIDTH*HEIGHT*4*4);
         if(grad && rotated) {
           try {
-            if(runtime._sphere_run_curvature(input,depth.length,grad,rotated)===0) {
+            if(runtime._sphere_run_curvature(input,disparity.length,grad,rotated)===0) {
               const gradValues=runtime.HEAPF32.slice(grad/4,grad/4+WIDTH*HEIGHT*2);
               const rotatedValues=runtime.HEAPF32.slice(rotated/4,rotated/4+WIDTH*HEIGHT*4);
               postMessage({id,type:'curvature',grad:gradValues,rotated:rotatedValues,elapsed:performance.now()-start},[gradValues.buffer,rotatedValues.buffer]);

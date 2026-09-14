@@ -54,7 +54,7 @@ const HEIGHT: f32 = 392.0;
 fn display_z(d: f32, range: (f32, f32), spread: f32) -> f32 {
     let denom = (range.1 - range.0).max(1e-6);
     let t = ((d - range.0) / denom).clamp(0.0, 1.0);
-    0.06f32.max(2.0 + spread * (1.0 / (0.45 + 1.55 * t) - 1.0))
+    0.06f32.max(2.0 + spread * (-0.5 + 1.72 * t))
 }
 
 fn point_at(x: f32, y: f32, d: f32, range: (f32, f32), spread: f32) -> [f32; 3] {
@@ -72,10 +72,7 @@ fn depth_from_z(pz: f32, range: (f32, f32), spread: f32) -> Option<f32> {
     if !lo.is_finite() || !hi.is_finite() || hi <= lo {
         return None;
     }
-    let term = 1.0 - pz / spread.max(1e-6);
-    let clamped_term = term.clamp(0.4, 2.5);
-    let val = 1.0 / clamped_term;
-    let t = ((val - 0.45) / 1.55).clamp(0.0, 1.0);
+    let t = ((0.5 - pz / spread.max(1e-6)) / 1.72).clamp(0.0, 1.0);
     Some(lo + t * (hi - lo))
 }
 
