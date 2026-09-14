@@ -10,5 +10,5 @@
   },
   "entry": "main",
   "runtime": "IREE VMVX",
-  "sourceRevision": "42094e8616c1e5793741854ec3bdaa59647e2aa9"
+  "sourceRevision": "d825b18c8f31cd251b0996f7c3fc914c9b36a2c6"
 }
