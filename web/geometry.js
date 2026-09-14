@@ -76,16 +76,25 @@ export function pointAt(x, y, z_val, range, spread = 1) {
   const focal = WIDTH / (2 * Math.tan(Math.PI / 6)); // assumed 60° horizontal field of view
   return [(x - (WIDTH - 1) / 2) * z / focal, ((HEIGHT - 1) / 2 - y) * z / focal, 2 - z];
 }
-export function pointCloud(depth, rgba, spread = 1, step = 1, rotated = null) {
+export function pointCloud(depth, rgba, spread = 1, step = 1, rotated = null, centers = null) {
   if (depth.length !== WIDTH * HEIGHT || rgba.length !== WIDTH * HEIGHT * 4) throw new Error('Invalid point cloud input.');
   const range = depthRange(depth), data = [];
   const hasRot = rotated && rotated.length === WIDTH * HEIGHT * 4;
+  const hasCent = centers && centers.length === WIDTH * HEIGHT * 3;
   for (let y = 0; y < HEIGHT; y += step) for (let x = 0; x < WIDTH; x += step) {
     const i = y * WIDTH + x, d = depth[i];
     if (!Number.isFinite(d) || d <= 0) continue;
     const pt = pointAt(x, y, d, range, spread);
     const r = rgba[i * 4] / 255, g = rgba[i * 4 + 1] / 255, b = rgba[i * 4 + 2] / 255;
-    if (hasRot) {
+    if (hasCent) {
+      const ri = hasRot ? i * 4 : 0;
+      const ci = i * 3;
+      const cx = centers[ci], cy = centers[ci + 1], cz = centers[ci + 2];
+      const isConvex = Number.isFinite(cx) && Number.isFinite(cy) && Number.isFinite(cz);
+      const cPt = isConvex ? pointAt(cx, cy, cz, range, spread) : pt;
+      const rot = hasRot ? [rotated[ri], rotated[ri + 1], rotated[ri + 2], rotated[ri + 3]] : [0, 0, 0, 0];
+      data.push(...pt, r, g, b, ...rot, ...cPt, isConvex ? 1.0 : 0.0);
+    } else if (hasRot) {
       const ri = i * 4;
       data.push(...pt, r, g, b, rotated[ri], rotated[ri + 1], rotated[ri + 2], rotated[ri + 3]);
     } else {
@@ -478,16 +487,110 @@ export function grabLevelCurveLines(depth, range, spread = 1, grabPositions = []
     if (grad && rotated) {
       const vectorLines = curvatureVectorLines(closest, grad, rotated, 0.08);
       for (let i = 0; i < vectorLines.length; i++) out.push(vectorLines[i]);
+
+      const centerRes = centerEstimateAt(closest, level, grad, rotated, range, spread);
+      if (centerRes && centerRes.isConvex && centerRes.center3D) {
+        const c3 = centerRes.center3D;
+        const lineColor = [1.0, 0.75, 0.2];
+        out.push(
+          closest[0], closest[1], closest[2], ...lineColor,
+          c3[0], c3[1], c3[2], ...lineColor
+        );
+        const centerSphere = smallSphereLines(c3, 0.015, lineColor);
+        for (let i = 0; i < centerSphere.length; i++) out.push(centerSphere[i]);
+      }
     }
   }
   return new Float32Array(out);
+}
+
+export function pixelCenterEstimate(x, y, depthMap, grad, rotated, range = null, spread = 1) {
+  if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) {
+    return { xc: NaN, yc: NaN, zc: NaN, center3D: null, isConvex: false };
+  }
+  const idx = y * WIDTH + x;
+  const d = depthMap ? depthMap[idx] : null;
+  const gy = grad[idx * 2];
+  const gx = grad[idx * 2 + 1];
+  const da2 = rotated[idx * 4];
+  const c01 = rotated[idx * 4 + 1];
+  const c10 = rotated[idx * 4 + 2];
+  const db2 = rotated[idx * 4 + 3];
+
+  const det = da2 * db2 - c01 * c10;
+  const diff = da2 - db2;
+  const isConvex = det > 0 && da2 >= 0 && diff > 1e-6 && db2 > 1e-6;
+  if (!isConvex) {
+    return { xc: NaN, yc: NaN, zc: NaN, center3D: null, isConvex: false };
+  }
+
+  const xc = x - gx / db2;
+  const yc = y - gy / db2;
+  const norm2 = gx * gx + gy * gy;
+  const dz = norm2 / diff;
+  const zc = (d !== null && Number.isFinite(d)) ? d + dz : NaN;
+  const center3D = (range && Number.isFinite(zc)) ? pointAt(xc, yc, zc, range, spread) : null;
+  return { xc, yc, zc, center3D, isConvex: true };
+}
+
+export function centerEstimateAt(closestPoint, level, grad, rotated, range, spread = 1) {
+  if (!closestPoint || closestPoint.length < 3 || !grad || !rotated || !range) return null;
+  const [cx, cy, cz] = closestPoint;
+  const z = 2 - cz;
+  if (z <= 0.05) return null;
+  const focal = WIDTH / (2 * Math.tan(Math.PI / 6));
+  const x = cx * focal / z + (WIDTH - 1) / 2;
+  const y = (HEIGHT - 1) / 2 - cy * focal / z;
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) {
+    return null;
+  }
+
+  const x0 = Math.min(WIDTH - 1, Math.max(0, Math.floor(x)));
+  const x1 = Math.min(WIDTH - 1, x0 + 1);
+  const fx = x - x0;
+  const y0 = Math.min(HEIGHT - 1, Math.max(0, Math.floor(y)));
+  const y1 = Math.min(HEIGHT - 1, y0 + 1);
+  const fy = y - y0;
+
+  const sample2D = (data, stride, offset) => {
+    const i00 = (y0 * WIDTH + x0) * stride + offset;
+    const i01 = (y0 * WIDTH + x1) * stride + offset;
+    const i10 = (y1 * WIDTH + x0) * stride + offset;
+    const i11 = (y1 * WIDTH + x1) * stride + offset;
+    return (data[i00] * (1 - fx) + data[i01] * fx) * (1 - fy)
+         + (data[i10] * (1 - fx) + data[i11] * fx) * fy;
+  };
+
+  const gy = sample2D(grad, 2, 0);
+  const gx = sample2D(grad, 2, 1);
+  const da2 = sample2D(rotated, 4, 0);
+  const c01 = sample2D(rotated, 4, 1);
+  const c10 = sample2D(rotated, 4, 2);
+  const db2 = sample2D(rotated, 4, 3);
+
+  const det = da2 * db2 - c01 * c10;
+  const diff = da2 - db2;
+  const isConvex = det > 0 && da2 >= 0 && diff > 1e-6 && db2 > 1e-6;
+  if (!isConvex) {
+    return { xc: NaN, yc: NaN, zc: NaN, center3D: null, isConvex: false };
+  }
+
+  const xc = x - gx / db2;
+  const yc = y - gy / db2;
+  const norm2 = gx * gx + gy * gy;
+  const dz = norm2 / diff;
+  const zc = level + dz;
+  const center3D = pointAt(xc, yc, zc, range, spread);
+  return { xc, yc, zc, center3D, isConvex: true };
 }
 
 export function cloudBounds(vertices) {
   if (!vertices || vertices.length < 6) {
     return { minX: -0.5, maxX: 0.5, minY: -0.5, maxY: 0.5, minZ: -0.5, maxZ: 0.5 };
   }
-  const stride = (vertices.length % 10 === 0 && vertices.length % 6 !== 0) ? 10 : 6;
+  let stride = 6;
+  if (vertices.length % 14 === 0 && vertices.length % 6 !== 0) stride = 14;
+  else if (vertices.length % 10 === 0 && vertices.length % 6 !== 0) stride = 10;
   let minX = Infinity, maxX = -Infinity;
   let minY = Infinity, maxY = -Infinity;
   let minZ = Infinity, maxZ = -Infinity;

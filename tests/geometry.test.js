@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {sphereLines,depthLevelCurves,depthFromZ,depthLevelCurveAt,closestPointOnSegments,smallSphereLines,grabLevelCurveLines,curvatureVectorLines,parseFloat32Tiff,normalizeImage,resizeDepth,selectDetections,pointCloud,pointAt,displayZ,WIDTH,HEIGHT,cloudBounds,computeViewportPinchScale} from '../web/geometry.js';
+import {sphereLines,depthLevelCurves,depthFromZ,depthLevelCurveAt,closestPointOnSegments,smallSphereLines,grabLevelCurveLines,curvatureVectorLines,parseFloat32Tiff,normalizeImage,resizeDepth,selectDetections,pointCloud,pointAt,displayZ,WIDTH,HEIGHT,cloudBounds,computeViewportPinchScale,pixelCenterEstimate,centerEstimateAt} from '../web/geometry.js';
 import {readFile} from 'node:fs/promises';
 test('RGB normalization is NCHW and uses ImageNet values',()=>{
   const out=normalizeImage(new Uint8ClampedArray([255,0,128,255,0,255,0,255]),2,1);
@@ -314,5 +314,105 @@ test('parseFloat32Tiff correctly decodes 32-bit float grayscale TIFF depth and d
   for (let i = 0; i < 100; i++) {
     assert.ok(Math.abs(depthFloats[i] * disparityFloats[i] - 1.0) < 1e-4);
   }
+});
+
+test('pixelCenterEstimate and centerEstimateAt calculate expected center and check convexity', () => {
+  const depth = new Float32Array(WIDTH * HEIGHT).fill(3.0);
+  const grad = new Float32Array(WIDTH * HEIGHT * 2);
+  const rotated = new Float32Array(WIDTH * HEIGHT * 4);
+  const x = 200, y = 150;
+  const idx = y * WIDTH + x;
+  depth[idx] = 2.0;
+  grad[idx * 2] = 0; // gy
+  grad[idx * 2 + 1] = 6.0; // gx
+  rotated[idx * 4] = 5.0; // da2
+  rotated[idx * 4 + 1] = 0; // c01
+  rotated[idx * 4 + 2] = 0; // c10
+  rotated[idx * 4 + 3] = 2.0; // db2
+
+  // det = 5 * 2 - 0 = 10 > 0
+  // da2 = 5 >= 0
+  // diff = 5 - 2 = 3 > 1e-6
+  // db2 = 2 > 1e-6 -> isConvex = true!
+  // xc = 200 - 6 / 2 = 197
+  // yc = 150 - 0 = 150
+  // dz = (0^2 + 6^2) / 3 = 12
+  // zc = 2.0 + 12 = 14
+  const res = pixelCenterEstimate(x, y, depth, grad, rotated, [1, 20]);
+  assert.equal(res.isConvex, true);
+  assert.equal(res.xc, 197);
+  assert.equal(res.yc, 150);
+  assert.equal(res.zc, 14);
+  assert.ok(res.center3D);
+  assert.equal(res.center3D.length, 3);
+  assert.ok(res.center3D.every(Number.isFinite));
+
+  // Non-convex cases:
+  // 1. da2 <= db2
+  rotated[idx * 4] = 1.0;
+  rotated[idx * 4 + 3] = 2.0;
+  const nonConvex1 = pixelCenterEstimate(x, y, depth, grad, rotated, [1, 20]);
+  assert.equal(nonConvex1.isConvex, false);
+  assert.ok(Number.isNaN(nonConvex1.xc));
+
+  // 2. Negative determinant
+  rotated[idx * 4] = -1.0;
+  rotated[idx * 4 + 3] = -2.0;
+  const nonConvex2 = pixelCenterEstimate(x, y, depth, grad, rotated, [1, 20]);
+  assert.equal(nonConvex2.isConvex, false);
+
+  // 3. Out of bounds
+  const outOfBounds = pixelCenterEstimate(-10, y, depth, grad, rotated);
+  assert.equal(outOfBounds.isConvex, false);
+});
+
+test('pointCloud produces stride 14 vertices when centers buffer is provided', () => {
+  const d = new Float32Array(WIDTH * HEIGHT).fill(1), rgba = new Uint8ClampedArray(WIDTH * HEIGHT * 4).fill(255);
+  const rot = new Float32Array(WIDTH * HEIGHT * 4).fill(0.5);
+  const centers = new Float32Array(WIDTH * HEIGHT * 3).fill(2.0);
+  d[0] = NaN; // skips 1 vertex
+  const { vertices } = pointCloud(d, rgba, 1, 2, rot, centers);
+  const numValid = Math.ceil(WIDTH / 2) * Math.ceil(HEIGHT / 2) - 1;
+  assert.equal(vertices.length, numValid * 14);
+  assert.ok(vertices.every(Number.isFinite));
+  // Stride 14 layout:
+  // [X, Y, Z, R, G, B, R00, R01, R10, R11, CX, CY, CZ, Valid]
+  assert.equal(vertices[6], 0.5);
+  assert.equal(vertices[9], 0.5);
+  assert.equal(vertices[13], 1.0); // Valid flag for convex / finite center
+
+  const b = cloudBounds(vertices);
+  assert.ok(Number.isFinite(b.minX));
+  assert.ok(Number.isFinite(b.maxX));
+});
+
+test('grabLevelCurveLines appends center ray and sphere marker when curvature indicates convexity', () => {
+  const depthField = new Float32Array(WIDTH * HEIGHT);
+  for (let y = 0; y < HEIGHT; y++) {
+    for (let x = 0; x < WIDTH; x++) {
+      depthField[y * WIDTH + x] = 1 + (x / WIDTH) * 3;
+    }
+  }
+  const grad = new Float32Array(WIDTH * HEIGHT * 2);
+  const rotated = new Float32Array(WIDTH * HEIGHT * 4);
+  for (let i = 0; i < WIDTH * HEIGHT; i++) {
+    grad[i * 2] = 0; // gy
+    grad[i * 2 + 1] = 2.0; // gx
+    rotated[i * 4] = 5.0; // da2
+    rotated[i * 4 + 1] = 0.0;
+    rotated[i * 4 + 2] = 0.0;
+    rotated[i * 4 + 3] = 2.0; // db2 -> diff = 3 > 0, det = 10 > 0 -> CONVEX!
+  }
+  const range = [1, 4];
+  const closestPoint = [0, 0, 2 - displayZ(2.5, range, 1)];
+  const baseLines = grabLevelCurveLines(depthField, range, 1, [closestPoint]);
+  const withConvexCurvature = grabLevelCurveLines(depthField, range, 1, [closestPoint], grad, rotated);
+  // Base lines + 72 vector lines + 12 ray line floats + smallSphereLines(c3, 0.015)
+  // smallSphereLines has 3 orthogonal circles of 24 segments + 2 latitude rings of 24 segments = 5 * 24 = 120 segments.
+  // 120 segments * 2 vertices * 6 floats = 1440 floats.
+  // Total added = 72 + 12 + 1440 = 1524 floats.
+  assert.ok(withConvexCurvature.length > baseLines.length + 72);
+  assert.equal(withConvexCurvature.length, baseLines.length + 72 + 12 + 1440);
+  assert.ok(withConvexCurvature.every(Number.isFinite));
 });
 

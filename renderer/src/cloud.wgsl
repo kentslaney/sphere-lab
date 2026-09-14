@@ -1,4 +1,4 @@
-struct Uniforms { mvp: mat4x4f, model: mat4x4f }
+struct Uniforms { mvp: mat4x4f, model: mat4x4f, params: vec4f }
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
 struct Out { @builtin(position) position: vec4f, @location(0) color: vec3f }
@@ -8,10 +8,15 @@ struct PointOut { @builtin(position) position: vec4f, @location(0) color: vec4f 
     @location(0) position: vec3f,
     @location(1) color: vec3f,
     @location(2) rotated: vec4f,
+    @location(3) center: vec4f,
     @builtin(vertex_index) index: u32
 ) -> PointOut {
+    let t = uniforms.params.x;
+    let target_pos = select(position, center.xyz, center.w > 0.5);
+    let current_pos = mix(position, target_pos, t);
+
     let corners = array<vec2f,6>(vec2f(-1,-1),vec2f(1,-1),vec2f(1,1),vec2f(-1,-1),vec2f(1,1),vec2f(-1,1));
-    var p = uniforms.mvp * vec4f(position, 1);
+    var p = uniforms.mvp * vec4f(current_pos, 1);
     p = vec4f(p.xy + corners[index] * 0.0028 * p.w, p.zw);
 
     // Compute determinant of the 2x2 rotated Hessian:
@@ -28,7 +33,10 @@ struct PointOut { @builtin(position) position: vec4f, @location(0) color: vec4f 
     // If rotated is populated (non-zero), use half-opacity (0.5) for non-inward/non-concave points.
     // If rotated is all zeros (debug curvature not loaded), full opacity (1.0).
     let has_curvature = (r00 != 0.0) || (r11 != 0.0) || (r01 != 0.0) || (r10 != 0.0);
-    let alpha = select(1.0, select(0.5, 1.0, is_inward), has_curvature);
+    var alpha = select(1.0, select(0.5, 1.0, is_inward), has_curvature);
+    if (center.w <= 0.5) {
+        alpha = alpha * (1.0 - t);
+    }
 
     return PointOut(p, vec4f(color, alpha));
 }

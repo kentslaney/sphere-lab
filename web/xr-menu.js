@@ -1,10 +1,15 @@
 export const MENU_ITEMS = ['config', 'debug', 'Cancel'];
-export const getMenuItems = (debug = false) => ['config', debug ? 'reset' : 'debug', 'Cancel'];
+export const getMenuItems = (debug = false, centers = false) => [
+  'config',
+  debug ? 'reset' : 'debug',
+  centers ? 'surface' : 'centers',
+  'Cancel'
+];
 export const MENU_WIDTH = 512;
 export const MENU_HEIGHT = 320;
 
 // Canvas owns all menu styling and text; WGSL samples the exported RGBA texture.
-export function menuPixels(selected, items = MENU_ITEMS, hint = '') {
+export function menuPixels(selected, items = MENU_ITEMS, hint = '', disabledIndices = []) {
   const height = menuHeight(items, hint);
   const canvas = document.createElement('canvas');
   canvas.width = MENU_WIDTH; canvas.height = height;
@@ -13,9 +18,15 @@ export function menuPixels(selected, items = MENU_ITEMS, hint = '') {
     ctx.fillStyle = color; ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill();
   };
   box(4, 4, 504, height - 8, 24, '#f5f5f5');
-  if (selected >= 0) box(16, 16 + selected * 96, 480, 96, 14, '#d9e4f2');
-  ctx.font = '32px system-ui, sans-serif'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#000';
-  items.forEach((text, i) => ctx.fillText(text, 40, 64 + i * 96));
+  if (selected >= 0 && !disabledIndices.includes(selected)) {
+    box(16, 16 + selected * 96, 480, 96, 14, '#d9e4f2');
+  }
+  ctx.font = '32px system-ui, sans-serif'; ctx.textBaseline = 'middle';
+  items.forEach((text, i) => {
+    const isDisabled = disabledIndices.includes(i);
+    ctx.fillStyle = isDisabled ? '#9aa0a6' : '#000000';
+    ctx.fillText(text, 40, 64 + i * 96);
+  });
   if (hint) { ctx.font = '20px system-ui, sans-serif'; ctx.fillStyle = '#444'; ctx.fillText(hint, 28, height - 28, MENU_WIDTH - 56); }
   return new Uint8Array(ctx.getImageData(0, 0, MENU_WIDTH, height).data.buffer);
 }

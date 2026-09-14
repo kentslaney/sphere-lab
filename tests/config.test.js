@@ -44,10 +44,12 @@ test('config tracking interruption and multiple grabs do not toggle settings', (
   move(1,0); assert.equal(panel.selected, -1);
 });
 
-test('VR context menu has config, debug, and Cancel; expanded texture quad retains correct aspect ratio', () => {
+test('VR context menu has config, debug/reset, centers/surface, and Cancel; expanded texture quad retains correct aspect ratio', () => {
   assert.deepEqual(MENU_ITEMS, ['config', 'debug', 'Cancel']);
-  assert.deepEqual(getMenuItems(false), ['config', 'debug', 'Cancel']);
-  assert.deepEqual(getMenuItems(true), ['config', 'reset', 'Cancel']);
+  assert.deepEqual(getMenuItems(false, false), ['config', 'debug', 'centers', 'Cancel']);
+  assert.deepEqual(getMenuItems(true, false), ['config', 'reset', 'centers', 'Cancel']);
+  assert.deepEqual(getMenuItems(false, true), ['config', 'debug', 'surface', 'Cancel']);
+  assert.deepEqual(getMenuItems(true, true), ['config', 'reset', 'surface', 'Cancel']);
   const height = menuHeight(['Depth spread', 'Minimum score', 'Show detections', 'Done'], 'Hint');
   const vertices = menuVertices([0,0,-1], [0,0,0], height, 3);
   assert.equal(vertices.length, 30); assert.ok(vertices.every(Number.isFinite));

@@ -79,10 +79,12 @@ onmessage=async ({data:{id,type,rgba,depth:provided,debug,isExample}})=>{
       const input=runtime._malloc(depth.byteLength);
       const grad=runtime._malloc(WIDTH*HEIGHT*2*4);
       const rotated=runtime._malloc(WIDTH*HEIGHT*4*4);
-      if(!input||!grad||!rotated){
+      const centers=runtime._malloc(WIDTH*HEIGHT*3*4);
+      if(!input||!grad||!rotated||!centers){
         if(input) runtime._free(input);
         if(grad) runtime._free(grad);
         if(rotated) runtime._free(rotated);
+        if(centers) runtime._free(centers);
         throw new Error('Curvature memory allocation failed.');
       }
       try {
@@ -90,14 +92,21 @@ onmessage=async ({data:{id,type,rgba,depth:provided,debug,isExample}})=>{
         for (let i = 0; i < depth.length; i++) disparity[i] = 1.0 / Math.max(1e-6, depth[i]);
         runtime.HEAPF32.set(disparity, input / 4);
         if (runtime._sphere_run_curvature(input, disparity.length, grad, rotated)) throw new Error(runtime.UTF8ToString(runtime._sphere_error()));
+        let centersValues = null;
+        if (runtime._sphere_run_centers(input, disparity.length, centers) === 0) {
+          centersValues = runtime.HEAPF32.slice(centers / 4, centers / 4 + WIDTH * HEIGHT * 3);
+        }
         const gradValues = runtime.HEAPF32.slice(grad / 4, grad / 4 + WIDTH * HEIGHT * 2);
         const rotatedValues = runtime.HEAPF32.slice(rotated / 4, rotated / 4 + WIDTH * HEIGHT * 4);
-        postMessage({ id, type: 'curvature', grad: gradValues, rotated: rotatedValues, elapsed: performance.now() - start }, [gradValues.buffer, rotatedValues.buffer]);
+        const transfer = [gradValues.buffer, rotatedValues.buffer];
+        if (centersValues) transfer.push(centersValues.buffer);
+        postMessage({ id, type: 'curvature', grad: gradValues, rotated: rotatedValues, centers: centersValues, elapsed: performance.now() - start }, transfer);
         return;
       } finally {
         runtime._free(input);
         runtime._free(grad);
         runtime._free(rotated);
+        runtime._free(centers);
       }
     }
     let depth=provided;
@@ -171,16 +180,24 @@ onmessage=async ({data:{id,type,rgba,depth:provided,debug,isExample}})=>{
       if(debug) {
         const grad=runtime._malloc(WIDTH*HEIGHT*2*4);
         const rotated=runtime._malloc(WIDTH*HEIGHT*4*4);
-        if(grad && rotated) {
+        const centers=runtime._malloc(WIDTH*HEIGHT*3*4);
+        if(grad && rotated && centers) {
           try {
             if(runtime._sphere_run_curvature(input,disparity.length,grad,rotated)===0) {
+              let centersValues = null;
+              if (runtime._sphere_run_centers(input, disparity.length, centers) === 0) {
+                centersValues = runtime.HEAPF32.slice(centers / 4, centers / 4 + WIDTH * HEIGHT * 3);
+              }
               const gradValues=runtime.HEAPF32.slice(grad/4,grad/4+WIDTH*HEIGHT*2);
               const rotatedValues=runtime.HEAPF32.slice(rotated/4,rotated/4+WIDTH*HEIGHT*4);
-              postMessage({id,type:'curvature',grad:gradValues,rotated:rotatedValues,elapsed:performance.now()-start},[gradValues.buffer,rotatedValues.buffer]);
+              const transfer = [gradValues.buffer, rotatedValues.buffer];
+              if (centersValues) transfer.push(centersValues.buffer);
+              postMessage({id,type:'curvature',grad:gradValues,rotated:rotatedValues,centers:centersValues,elapsed:performance.now()-start},transfer);
             }
           } finally {
             runtime._free(grad);
             runtime._free(rotated);
+            runtime._free(centers);
           }
         }
       }

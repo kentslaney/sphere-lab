@@ -49,5 +49,23 @@ test('compiled detector recovers a known sphere and survives repeated invocation
       m._free(gradPtr);
       m._free(rotatedPtr);
     }
+
+    const centersPtr = m._malloc(392 * 518 * 3 * 4);
+    try {
+      assert.equal(m._sphere_run_centers(input, inputBytes.length / 4, centersPtr), 0, m.UTF8ToString(m._sphere_error()));
+      const centersValues = m.HEAPF32.slice(centersPtr / 4, centersPtr / 4 + 392 * 518 * 3);
+      assert.equal(centersValues.length, 392 * 518 * 3);
+      // Center of synthetic sphere: y=196, x=289
+      const idx = (196 * 518 + 289) * 3;
+      const xc = centersValues[idx], yc = centersValues[idx + 1], zc = centersValues[idx + 2];
+      assert.ok(Math.abs(xc - 259) < 1.0);
+      assert.ok(Math.abs(yc - 196) < 1.0);
+      assert.ok(Math.abs(zc - 3.0) < 0.1);
+      // Flat background point outside sphere (e.g. y=10, x=10) is non-convex -> NaN
+      const bgIdx = (10 * 518 + 10) * 3;
+      assert.ok(Number.isNaN(centersValues[bgIdx]));
+    } finally {
+      m._free(centersPtr);
+    }
   }finally{m._sphere_close();m._free(graphPtr);m._free(input);m._free(out);}
 });

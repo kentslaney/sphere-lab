@@ -22,5 +22,5 @@ target_link_options(sphere_runtime PRIVATE
   "-sMODULARIZE=1" "-sEXPORT_ES6=1" "-sEXPORT_NAME=createSphereRuntime"
   "-sALLOW_MEMORY_GROWTH=1" "-sINITIAL_MEMORY=67108864" "-sMAXIMUM_MEMORY=2147483648"
   "-sFILESYSTEM=0" "-sENVIRONMENT=web,worker,node" "-sNO_EXIT_RUNTIME=1"
-  "-sEXPORTED_FUNCTIONS=['_sphere_init','_sphere_run','_sphere_run_curvature','_sphere_close','_sphere_error','_malloc','_free']"
+  "-sEXPORTED_FUNCTIONS=['_sphere_init','_sphere_run','_sphere_run_curvature','_sphere_run_centers','_sphere_close','_sphere_error','_malloc','_free']"
   "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','HEAPF32','UTF8ToString']" "--no-entry")

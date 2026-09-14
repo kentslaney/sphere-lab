@@ -1,12 +1,12 @@
 import {spreadFromSlider, spreadToSlider} from './config.js';
 import {requestModelPersistence} from './model-cache.js';
 import {createViewer} from './viewer.js';
-import {WIDTH,HEIGHT,pointCloud,sphereLines,depthLevelCurves,grabLevelCurveLines,selectDetections,depthRange,cloudBounds} from './geometry.js';
+import {WIDTH,HEIGHT,pointAt,pointCloud,sphereLines,depthLevelCurves,grabLevelCurveLines,selectDetections,depthRange,cloudBounds} from './geometry.js';
 const $=id=>document.getElementById(id);
 let viewer=null, worker=null, job=0, rgba=null, depth=null, candidates=null, range=null, bounds=null, cloudVertices=null;
 let selected=[], sourceName='', depthMs=0, detectorMs=0, busy=false, debugMode=false;
 let baseLines=new Float32Array(), currentGrabs=[];
-let lastGrad=null, lastRotated=null;
+let lastGrad=null, lastRotated=null, lastCenters=null;
 const photo=$('photo').getContext('2d'),depthCanvas=$('depth').getContext('2d');
 function status(message,error=false){$('status').textContent=message;$('status').classList.toggle('error',error);}
 function controls(running){busy=running;$('file').disabled=running;$('example').disabled=running;$('cancel').hidden=!running;}
@@ -15,7 +15,7 @@ function rebuild(updateCloud=true) {
   if(!depth||!rgba) return;
   const spread=spreadFromSlider($('spread').value), threshold=Number($('threshold').value);
   if(updateCloud) {
-    const cloud=pointCloud(depth,rgba,spread,1,debugMode ? lastRotated : null);
+    const cloud=pointCloud(depth,rgba,spread,1,debugMode ? lastRotated : null, debugMode ? lastCenters : null);
     range=cloud.range;
     cloudVertices=cloud.vertices;
     bounds=cloudBounds(cloud.vertices);
@@ -27,7 +27,9 @@ function rebuild(updateCloud=true) {
         viewer.setCurvature?.(lastGrad, lastRotated);
       }
     }
-    const stride = (cloud.vertices.length % 10 === 0 && cloud.vertices.length % 6 !== 0) ? 10 : 6;
+    let stride = 6;
+    if (cloud.vertices.length % 14 === 0 && cloud.vertices.length % 6 !== 0) stride = 14;
+    else if (cloud.vertices.length % 10 === 0 && cloud.vertices.length % 6 !== 0) stride = 10;
     $('point-count').textContent=`${(cloud.vertices.length/stride).toLocaleString()} POINTS`;
   }
   const allLines=[];
@@ -90,6 +92,7 @@ function startWorker(){
       } else if(data.type==='curvature'){
         lastGrad=data.grad;
         lastRotated=data.rotated;
+        lastCenters=data.centers;
         viewer?.setCurvature?.(lastGrad, lastRotated);
         if(debugMode) {
           rebuild(true);
@@ -120,7 +123,7 @@ async function analyze(blob,name,isExample=false){
       photo.drawImage(bitmap,(bitmap.width-cropWidth)/2,(bitmap.height-cropHeight)/2,cropWidth,cropHeight,0,0,WIDTH,HEIGHT);
     } finally {bitmap.close();}
     rgba=photo.getImageData(0,0,WIDTH,HEIGHT).data;
-    lastGrad=null;lastRotated=null;
+    lastGrad=null;lastRotated=null;lastCenters=null;
     $('filename').textContent=`${name} · center crop ${WIDTH} × ${HEIGHT} · processed locally`;
     const isExampleImage = isExample || name === 'Example photo' || name === 'example.jpg';
     stage('depth','active');startWorker();worker.postMessage({id:currentJob,type:'infer',rgba,debug:debugMode,isExample:isExampleImage});
@@ -133,6 +136,23 @@ $('example').addEventListener('click',async()=>{
   catch(error){status(error.message,true);}
 });
 $('cancel').addEventListener('click',()=>{++job;worker?.terminate();worker=null;controls(false);for(const el of document.querySelectorAll('.stages .active'))el.classList.remove('active');status('Canceled. Choose another image to start again.');$('result-heading').textContent=depth?'Depth ready · detection canceled':'Canceled';});
+function handlePixelSelect(canvasEl, e) {
+  if (!debugMode || !depth || !range) return;
+  const rect = canvasEl.getBoundingClientRect();
+  const x = Math.floor((e.clientX - rect.left) * (WIDTH / rect.width));
+  const y = Math.floor((e.clientY - rect.top) * (HEIGHT / rect.height));
+  if (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT) {
+    const d = depth[y * WIDTH + x];
+    if (Number.isFinite(d) && d > 0) {
+      const spread = spreadFromSlider($('spread').value);
+      const pt = pointAt(x, y, d, range, spread);
+      currentGrabs = [pt];
+      updateLines();
+    }
+  }
+}
+$('depth').addEventListener('click', e => handlePixelSelect($('depth'), e));
+$('photo').addEventListener('click', e => handlePixelSelect($('photo'), e));
 function updateLines() {
   if(!viewer) return;
   if(!debugMode || currentGrabs.length !== 1 || !depth || !range) {

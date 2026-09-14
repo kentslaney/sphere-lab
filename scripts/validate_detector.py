@@ -3,7 +3,7 @@
 import json, pathlib, sys
 import numpy as np
 import iree.runtime as rt
-from export_detector import detect, curvature, HEIGHT, WIDTH
+from export_detector import detect, curvature, centers, HEIGHT, WIDTH
 ROOT=pathlib.Path(__file__).resolve().parent.parent
 out=ROOT/'tests/generated';out.mkdir(exist_ok=True)
 y,x=np.mgrid[:HEIGHT,:WIDTH]
@@ -13,6 +13,7 @@ d=(1/z).astype(np.float32)
 d.tofile(out/'synthetic-depth.bin')
 expected=np.asarray(detect(d))
 expected_grad, expected_rotated = [np.asarray(x) for x in curvature(d)]
+expected_centers = np.asarray(centers(d))
 config=rt.Config('local-sync')
 module=rt.VmModule.copy_buffer(config.vm_instance,(ROOT/'models/sphere-detector.vmfb').read_bytes())
 ctx=rt.SystemContext(config=config);ctx.add_vm_module(module)
@@ -21,10 +22,24 @@ actual=np.array(result.to_host(),copy=True)
 curv_result=ctx.modules[module.name].curvature(d)
 actual_grad=np.array(curv_result[0].to_host(),copy=True)
 actual_rotated=np.array(curv_result[1].to_host(),copy=True)
+cent_result=ctx.modules[module.name].centers(d)
+actual_centers=np.array(cent_result.to_host(),copy=True)
 
 np.testing.assert_allclose(actual_grad, expected_grad, atol=1e-3)
 np.testing.assert_allclose(actual_rotated, expected_rotated, atol=1e-3)
 print('Curvature grad and rotated match between JAX and IREE VMVX.')
+
+# Check centers match between JAX and IREE VMVX
+valid_mask = ~np.isnan(expected_centers)
+assert np.all(valid_mask == ~np.isnan(actual_centers)), "Convexity mask mismatch"
+np.testing.assert_allclose(actual_centers[valid_mask], expected_centers[valid_mask], atol=0.1)
+print('Centers match between JAX and IREE VMVX.')
+
+# Check geometric center recovery on synthetic sphere
+cy, cx = int(HEIGHT/2), int(WIDTH/2)
+on_sphere_center = actual_centers[cy, cx+30]
+np.testing.assert_allclose(on_sphere_center, [cx, cy, 3.0], atol=0.05)
+print('Synthetic sphere center estimate verified at (196, 289):', on_sphere_center)
 
 # The symmetric fixture causes tied candidates; compare geometric recovery and
 # report score drift instead of hiding it behind a permissive score tolerance.

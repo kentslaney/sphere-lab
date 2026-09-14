@@ -46,6 +46,7 @@ pub struct Renderer {
     grad_data: Option<Vec<f32>>,
     rotated_data: Option<Vec<f32>>,
     base_lines: Vec<f32>,
+    center_anim_t: f32,
 }
 
 const WIDTH: f32 = 518.0;
@@ -307,6 +308,103 @@ fn curvature_vector_lines(
     out
 }
 
+fn small_sphere_lines(center: [f32; 3], radius: f32, color: [f32; 3]) -> Vec<f32> {
+    let mut out = Vec::new();
+    let [cx, cy, cz] = center;
+    let segments = 16;
+    for i in 0..segments {
+        let a0 = (i as f32 / segments as f32) * std::f32::consts::PI * 2.0;
+        let a1 = ((i + 1) as f32 / segments as f32) * std::f32::consts::PI * 2.0;
+        out.extend_from_slice(&[
+            cx + radius * a0.cos(), cy + radius * a0.sin(), cz, color[0], color[1], color[2],
+            cx + radius * a1.cos(), cy + radius * a1.sin(), cz, color[0], color[1], color[2],
+        ]);
+        out.extend_from_slice(&[
+            cx, cy + radius * a0.cos(), cz + radius * a0.sin(), color[0], color[1], color[2],
+            cx, cy + radius * a1.cos(), cz + radius * a1.sin(), color[0], color[1], color[2],
+        ]);
+        out.extend_from_slice(&[
+            cx + radius * a0.sin(), cy, cz + radius * a0.cos(), color[0], color[1], color[2],
+            cx + radius * a1.sin(), cy, cz + radius * a1.cos(), color[0], color[1], color[2],
+        ]);
+    }
+    out
+}
+
+fn center_estimate_lines(
+    closest: [f32; 3],
+    level: f32,
+    grad: &[f32],
+    rotated: &[f32],
+    range: (f32, f32),
+    spread: f32,
+) -> Vec<f32> {
+    let [cx, cy, cz] = closest;
+    let z = 2.0 - cz;
+    if z <= 0.05 {
+        return Vec::new();
+    }
+    let focal = WIDTH / (2.0 * (std::f32::consts::PI / 6.0).tan());
+    let x = cx * focal / z + (WIDTH - 1.0) / 2.0;
+    let y = (HEIGHT - 1.0) / 2.0 - cy * focal / z;
+    if !x.is_finite() || !y.is_finite() || x < 0.0 || x >= WIDTH || y < 0.0 || y >= HEIGHT {
+        return Vec::new();
+    }
+
+    let x0 = (x.floor() as usize).min(WIDTH as usize - 1);
+    let x1 = (x0 + 1).min(WIDTH as usize - 1);
+    let fx = x - x0 as f32;
+
+    let y0 = (y.floor() as usize).min(HEIGHT as usize - 1);
+    let y1 = (y0 + 1).min(HEIGHT as usize - 1);
+    let fy = y - y0 as f32;
+
+    let sample_2d = |data: &[f32], stride: usize, offset: usize| -> f32 {
+        let i00 = (y0 * (WIDTH as usize) + x0) * stride + offset;
+        let i01 = (y0 * (WIDTH as usize) + x1) * stride + offset;
+        let i10 = (y1 * (WIDTH as usize) + x0) * stride + offset;
+        let i11 = (y1 * (WIDTH as usize) + x1) * stride + offset;
+        (data[i00] * (1.0 - fx) + data[i01] * fx) * (1.0 - fy)
+            + (data[i10] * (1.0 - fx) + data[i11] * fx) * fy
+    };
+
+    let gy = sample_2d(grad, 2, 0);
+    let gx = sample_2d(grad, 2, 1);
+    let da2 = sample_2d(rotated, 4, 0);
+    let c01 = sample_2d(rotated, 4, 1);
+    let c10 = sample_2d(rotated, 4, 2);
+    let db2 = sample_2d(rotated, 4, 3);
+
+    let det = da2 * db2 - c01 * c10;
+    let diff = da2 - db2;
+    if det <= 0.0 || da2 < 0.0 || diff <= 1e-6 || db2 <= 1e-6 {
+        return Vec::new();
+    }
+
+    let xc = x - gx / db2;
+    let yc = y - gy / db2;
+    let norm2 = gx * gx + gy * gy;
+    let dz = norm2 / diff.max(1e-6);
+    let zc = level + dz;
+
+    let center_pt = point_at(xc, yc, zc, range, spread);
+    if !center_pt.iter().all(|v| v.is_finite()) {
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+    let line_color = [1.0f32, 0.75, 0.2];
+    out.extend_from_slice(&[
+        closest[0], closest[1], closest[2], line_color[0], line_color[1], line_color[2],
+        center_pt[0], center_pt[1], center_pt[2], line_color[0], line_color[1], line_color[2],
+    ]);
+
+    let sphere = small_sphere_lines(center_pt, 0.015, line_color);
+    out.extend_from_slice(&sphere);
+
+    out
+}
+
 fn format(name: &str) -> Result<wgpu::TextureFormat, JsValue> {
     match name {
         "rgba8unorm" => Ok(wgpu::TextureFormat::Rgba8Unorm),
@@ -366,7 +464,7 @@ impl Renderer {
         });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("view uniforms"),
-            size: 128,
+            size: 144,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -484,6 +582,7 @@ impl Renderer {
             grad_data: None,
             rotated_data: None,
             base_lines: Vec::new(),
+            center_anim_t: 0.0,
         })
     }
 
@@ -563,7 +662,7 @@ impl Renderer {
             let is_hud = kind == 3;
             let rgb_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
             let rgba_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4];
-            let point_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4];
+            let point_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Float32x4];
             let pipeline = self
                 .device
                 .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -582,7 +681,7 @@ impl Renderer {
                         entry_point: Some(if is_point { "point" } else if is_shell || is_hud { "shell" } else { "line" }),
                         compilation_options: Default::default(),
                         buffers: &[Some(wgpu::VertexBufferLayout {
-                            array_stride: if is_point { 40 } else if is_shell || is_hud { 28 } else { 24 },
+                            array_stride: if is_point { 56 } else if is_shell || is_hud { 28 } else { 24 },
                             step_mode: if is_point {
                                 wgpu::VertexStepMode::Instance
                             } else {
@@ -672,7 +771,7 @@ impl Renderer {
         if !points.iter().all(|x| x.is_finite()) {
             return Err(JsValue::from_str("Invalid cloud vertices"));
         }
-        if points.len() % 10 == 0 && points.len() <= 518 * 392 * 10 {
+        if points.len() % 14 == 0 && points.len() <= 518 * 392 * 14 {
             self.cloud = Some(
                 self.device
                     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -681,16 +780,16 @@ impl Renderer {
                         usage: wgpu::BufferUsages::VERTEX,
                     }),
             );
-            self.cloud_count = (points.len() / 10) as u32;
+            self.cloud_count = (points.len() / 14) as u32;
             return Ok(());
         }
-        if points.len() % 6 == 0 && points.len() <= 518 * 392 * 6 {
-            let count = points.len() / 6;
-            let mut expanded = Vec::with_capacity(count * 10);
+        if points.len() % 10 == 0 && points.len() <= 518 * 392 * 10 {
+            let count = points.len() / 10;
+            let mut expanded = Vec::with_capacity(count * 14);
             for i in 0..count {
-                let base = i * 6;
-                expanded.extend_from_slice(&points[base..base + 6]);
-                expanded.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);
+                let base = i * 10;
+                expanded.extend_from_slice(&points[base..base + 10]);
+                expanded.extend_from_slice(&[points[base], points[base + 1], points[base + 2], 0.0]);
             }
             self.cloud = Some(
                 self.device
@@ -703,7 +802,27 @@ impl Renderer {
             self.cloud_count = count as u32;
             return Ok(());
         }
-        Err(JsValue::from_str("Invalid cloud vertices stride; expected 10 or 6 floats per point"))
+        if points.len() % 6 == 0 && points.len() <= 518 * 392 * 6 {
+            let count = points.len() / 6;
+            let mut expanded = Vec::with_capacity(count * 14);
+            for i in 0..count {
+                let base = i * 6;
+                expanded.extend_from_slice(&points[base..base + 6]);
+                expanded.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);
+                expanded.extend_from_slice(&[points[base], points[base + 1], points[base + 2], 0.0]);
+            }
+            self.cloud = Some(
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("uploaded cloud"),
+                        contents: bytemuck::cast_slice(&expanded),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    }),
+            );
+            self.cloud_count = count as u32;
+            return Ok(());
+        }
+        Err(JsValue::from_str("Invalid cloud vertices stride; expected 14, 10 or 6 floats per point"))
     }
     pub fn set_lines(&mut self, lines: &[f32]) -> Result<(), JsValue> {
         if lines.len() % 12 != 0
@@ -847,6 +966,8 @@ impl Renderer {
         if let (Some(grad), Some(rotated)) = (self.grad_data.as_ref(), self.rotated_data.as_ref()) {
             let vector_lines = curvature_vector_lines(closest, grad, rotated, 0.08);
             combined.extend_from_slice(&vector_lines);
+            let center_lines = center_estimate_lines(closest, level, grad, rotated, self.depth_range, self.depth_spread);
+            combined.extend_from_slice(&center_lines);
         }
 
         if !combined.is_empty() {
@@ -861,6 +982,12 @@ impl Renderer {
             self.line_count = (combined.len() / 6) as u32;
         }
         Some(vec![closest[0], closest[1], closest[2]])
+    }
+
+    pub fn set_center_animation(&mut self, t: f32) {
+        if t.is_finite() {
+            self.center_anim_t = t.clamp(0.0, 1.0);
+        }
     }
 
     pub fn clear_grab_level_curve(&mut self) {
@@ -948,19 +1075,20 @@ impl Renderer {
                 * Mat4::from_rotation_x(0.2 + seconds * 0.15)
         };
         let mvp = Mat4::from_cols_slice(projection) * Mat4::from_cols_slice(view) * model;
-        let mut uniforms = [0f32; 32];
+        let mut uniforms = [0f32; 36];
         uniforms[..16].copy_from_slice(&mvp.to_cols_array());
-        uniforms[16..].copy_from_slice(&model.to_cols_array());
+        uniforms[16..32].copy_from_slice(&model.to_cols_array());
+        uniforms[32] = self.center_anim_t;
         self.queue
             .write_buffer(&self.uniform, 0, bytemuck::cast_slice(&uniforms));
         let world_mvp = Mat4::from_cols_slice(projection) * Mat4::from_cols_slice(view);
         uniforms[..16].copy_from_slice(&world_mvp.to_cols_array());
-        uniforms[16..].copy_from_slice(&Mat4::IDENTITY.to_cols_array());
-        self.queue.write_buffer(&self.feedback_uniform, 0, bytemuck::cast_slice(&uniforms));
+        uniforms[16..32].copy_from_slice(&Mat4::IDENTITY.to_cols_array());
+        self.queue.write_buffer(&self.feedback_uniform, 0, bytemuck::cast_slice(&uniforms[..32]));
         let hud_mvp = Mat4::from_cols_slice(projection);
         uniforms[..16].copy_from_slice(&hud_mvp.to_cols_array());
-        uniforms[16..].copy_from_slice(&Mat4::IDENTITY.to_cols_array());
-        self.queue.write_buffer(&self.hud_uniform, 0, bytemuck::cast_slice(&uniforms));
+        uniforms[16..32].copy_from_slice(&Mat4::IDENTITY.to_cols_array());
+        self.queue.write_buffer(&self.hud_uniform, 0, bytemuck::cast_slice(&uniforms[..32]));
         let color_view = self.attachment(color, layer)?;
         let depth_view = self.attachment(depth, layer)?;
         let mut encoder = self.device.create_command_encoder(&Default::default());

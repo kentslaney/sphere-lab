@@ -217,6 +217,9 @@ export async function createViewer(canvas, button, status, options = {}) {
             renderer.set_hud(new Float32Array());
             renderer.set_grab_feedback(new Float32Array());
             renderer.clear_grab_level_curve?.();
+            renderer.set_center_animation?.(0.0);
+            centersActive = false;
+            centerAnimT = 0.0;
             options.onGrabMove?.([]);
             if (!stopped) {
               status.textContent = 'Ready to enter VR again.';
@@ -241,6 +244,9 @@ export async function createViewer(canvas, button, status, options = {}) {
             let configWasOpen = false;
             let lastClosestModel = null;
             let isSelected = false;
+            let centersActive = false;
+            let centerAnimT = 0.0;
+            let lastAnimTime = 0;
 
             const updateGrab = attachCloudGrab(active, space, grab, applyGrab, (markers, meta = {}) => {
               const isSingleDebugGrab = Boolean(meta.isSingleDebugGrab && markers.length === 1);
@@ -278,14 +284,16 @@ export async function createViewer(canvas, button, status, options = {}) {
               renderer.set_grab_feedback(feedback);
             }, menu => {
               if (!menu) { renderer.set_menu(new Float32Array()); return; }
-              const items = getMenuItems(debugMode);
-              const menuKey = `${menu.selected}_${debugMode}`;
+              const items = getMenuItems(debugMode, centersActive);
+              const disabled = centersActive ? [1] : [];
+              const menuKey = `${menu.selected}_${debugMode}_${centersActive}`;
+              const height = menuHeight(items);
               if (menuKey !== menuSelection) {
-                renderer.set_menu_texture(menuPixels(menu.selected, items), MENU_WIDTH, MENU_HEIGHT);
+                renderer.set_menu_texture(menuPixels(menu.selected, items, '', disabled), MENU_WIDTH, height);
                 menuSelection = menuKey;
               }
               menuOrigin = [...menu.origin];
-              renderer.set_menu(menuVertices(menu.origin, currentViewerPos));
+              renderer.set_menu(menuVertices(menu.origin, currentViewerPos, height, items.length - 1));
             }, selected => {
               if (selected === 0) {
                 const dx = currentViewerPos[0] - menuOrigin[0], dz = currentViewerPos[2] - menuOrigin[2];
@@ -293,7 +301,10 @@ export async function createViewer(canvas, button, status, options = {}) {
                 config.open(menuOrigin, length > 1e-5 ? [dz / length, 0, -dx / length] : [1, 0, 0]);
                 configTexture = ''; menuSelection = '';
               } else if (selected === 1) {
-                options.onDebug?.();
+                if (!centersActive) options.onDebug?.();
+              } else if (selected === 2) {
+                centersActive = !centersActive;
+                menuSelection = '';
               }
             }, config, () => debugMode);
             function frame(time, xrFrame) {
@@ -301,6 +312,20 @@ export async function createViewer(canvas, button, status, options = {}) {
               // Request next frame at the start so visionOS compositor watchdog never times out
               active.requestAnimationFrame(frame);
               try {
+                if (lastAnimTime > 0) {
+                  const dt = Math.min(0.1, (time - lastAnimTime) / 1000);
+                  const targetT = centersActive ? 1.0 : 0.0;
+                  if (centerAnimT !== targetT) {
+                    const speed = 1.0 / 0.8;
+                    if (targetT > centerAnimT) {
+                      centerAnimT = Math.min(targetT, centerAnimT + speed * dt);
+                    } else {
+                      centerAnimT = Math.max(targetT, centerAnimT - speed * dt);
+                    }
+                    renderer.set_center_animation(centerAnimT);
+                  }
+                }
+                lastAnimTime = time;
                 const viewerPose = xrFrame.getViewerPose(space);
                 if (viewerPose) {
                   const p = viewerPose.transform.position;
@@ -508,6 +533,7 @@ export async function createViewer(canvas, button, status, options = {}) {
         renderer.set_hud(new Float32Array());
         renderer.clear_grab_level_curve?.();
         renderer.set_grab_feedback(new Float32Array());
+        renderer.set_center_animation?.(0.0);
       },
       getCamera: getCameraState,
       setDebug: enabled => {
@@ -526,6 +552,7 @@ export async function createViewer(canvas, button, status, options = {}) {
       setSpread: spread => {
         renderer.set_spread(spread);
       },
+      setCenterAnimation: t => renderer.set_center_animation?.(t),
       getRenderer: () => renderer,
       triggerDebug: () => options.onDebug?.(),
       onPose: cb => {
