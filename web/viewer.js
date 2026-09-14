@@ -245,7 +245,6 @@ export async function createViewer(canvas, button, status, options = {}) {
             const updateGrab = attachCloudGrab(active, space, grab, applyGrab, (markers, meta = {}) => {
               const isSingleDebugGrab = Boolean(meta.isSingleDebugGrab && markers.length === 1);
               isSelected = Boolean(meta.isPointSelected);
-              const keepFrozen = isSelected || Boolean(meta.isPendingPause);
               let closestPointWorld = null;
 
               if (isSingleDebugGrab) {
@@ -263,16 +262,19 @@ export async function createViewer(canvas, button, status, options = {}) {
                   const rotPt = rotate(grab.rotation, scaledPt);
                   closestPointWorld = [rotPt[0] + grab.position[0], rotPt[1] + grab.position[1], rotPt[2] + grab.position[2]];
                 }
-              } else if (keepFrozen && lastClosestModel) {
+              } else if (isSelected && lastClosestModel) {
+                renderer.update_grab_level_curve(lastClosestModel[0], lastClosestModel[1], lastClosestModel[2]);
                 const scaledPt = [lastClosestModel[0] * grab.scale, lastClosestModel[1] * grab.scale, lastClosestModel[2] * grab.scale];
                 const rotPt = rotate(grab.rotation, scaledPt);
                 closestPointWorld = [rotPt[0] + grab.position[0], rotPt[1] + grab.position[1], rotPt[2] + grab.position[2]];
               } else {
                 renderer.clear_grab_level_curve();
-                lastClosestModel = null;
+                if (!meta.isPendingPause) {
+                  lastClosestModel = null;
+                }
               }
 
-              const feedback = grabFeedbackVertices(markers, currentViewerPos, closestPointWorld, isSingleDebugGrab, keepFrozen);
+              const feedback = grabFeedbackVertices(markers, currentViewerPos, closestPointWorld, isSingleDebugGrab, isSelected);
               renderer.set_grab_feedback(feedback);
             }, menu => {
               if (!menu) { renderer.set_menu(new Float32Array()); return; }

@@ -148,3 +148,10 @@ test('selected point with no active markers renders solid bead at closest point'
   }
 });
 
+test('released grab with no point selected renders no bead', () => {
+  const closest = [0.5, 0.6, -1.2];
+  const vertices = grabFeedbackVertices([], [0, 0, 0], closest, false, false);
+  assert.equal(vertices.length, 0);
+});
+
+
