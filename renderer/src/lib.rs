@@ -393,7 +393,7 @@ fn center_estimate_lines(
     }
 
     let mut out = Vec::new();
-    let line_color = [1.0f32, 0.75, 0.2];
+    let line_color = [0.35f32, 0.55, 1.0];
     out.extend_from_slice(&[
         closest[0], closest[1], closest[2], line_color[0], line_color[1], line_color[2],
         center_pt[0], center_pt[1], center_pt[2], line_color[0], line_color[1], line_color[2],

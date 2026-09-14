@@ -1,3 +1,5 @@
+import { MENU_ITEMS } from './xr-menu.js';
+
 const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
 const dot = (a, b) => a.reduce((sum, v, i) => sum + v*b[i], 0);
 const normalize = a => { const n = Math.hypot(...a); return a.map(v => v/n); };
@@ -50,7 +52,7 @@ export class CloudGrab {
   }
 }
 
-export function attachCloudGrab(session, space, grab, apply, feedback = () => {}, menu = () => {}, select = () => {}, config = null, isDebug = () => false) {
+export function attachCloudGrab(session, space, grab, apply, feedback = () => {}, menu = () => {}, select = () => {}, config = null, isDebug = () => false, disabledItems = () => []) {
   const held = new Set();
   const origins = new Map();
   let lastHandCount = 0;
@@ -60,7 +62,7 @@ export function attachCloudGrab(session, space, grab, apply, feedback = () => {}
   const closeMenu = (commit = false) => {
     const selected = activeMenu?.selected;
     activeMenu = null; menu(null);
-    if (selected !== undefined && commit) select(selected);
+    if (selected !== undefined && commit && !disabledItems().includes(selected)) select(selected);
   };
   const hide = () => {
     origins.clear();
@@ -86,7 +88,7 @@ export function attachCloudGrab(session, space, grab, apply, feedback = () => {}
       return;
     }
     if (!held.size && pending && time - pending.time <= 350 && time >= pending.time) {
-      activeMenu = { source: event.inputSource, origin: null, selected: 2 };
+      activeMenu = { source: event.inputSource, origin: null, selected: MENU_ITEMS.length - 1 };
       candidate = null;
       debugLongPending = null; debugShortCandidate = null;
       grab.release();
@@ -230,17 +232,13 @@ export function attachCloudGrab(session, space, grab, apply, feedback = () => {}
       else {
         activeMenu.origin ??= [...p];
         const dy = p[1] - activeMenu.origin[1];
-        // Small hysteresis keeps tracking noise from flickering between rows.
-        // Row 2 is Cancel (dy ~ 0), Row 1 is debug (dy ~ 0.045), Row 0 is config (dy ~ 0.09)
-        if (activeMenu.selected === 2) {
-          if (dy > 0.07) activeMenu.selected = 0;
-          else if (dy > 0.025) activeMenu.selected = 1;
-        } else if (activeMenu.selected === 1) {
-          if (dy < 0.015) activeMenu.selected = 2;
-          else if (dy > 0.07) activeMenu.selected = 0;
-        } else if (activeMenu.selected === 0) {
-          if (dy < 0.015) activeMenu.selected = 2;
-          else if (dy < 0.06) activeMenu.selected = 1;
+        // Match the rendered row spacing, with Cancel anchored at hand height.
+        const lastRow = MENU_ITEMS.length - 1;
+        const rowSpacing = 0.24 * 96 / 512;
+        const row = lastRow - dy / rowSpacing;
+        // A 5 mm margin keeps tracking noise from flickering between rows.
+        if (Math.abs(row - activeMenu.selected) > 0.5 + 0.005 / rowSpacing) {
+          activeMenu.selected = Math.max(0, Math.min(lastRow, Math.round(row)));
         }
         hide(); menu(activeMenu); return;
       }

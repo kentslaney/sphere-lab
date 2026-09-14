@@ -142,11 +142,11 @@ test('two-hand start origins synchronize when second hand joins to anchor scale 
 });
 
 
-function menuHarness() {
+function menuHarness(disabled = []) {
   const listeners = {}, g = new CloudGrab(), shown = [], selected = [];
   const session = { visibilityState: 'visible', addEventListener: (n, f) => listeners[n] = f };
   const source = { gripSpace: {} };
-  const update = attachCloudGrab(session, {}, g, () => {}, () => {}, m => shown.push(m && { ...m }), i => selected.push(i));
+  const update = attachCloudGrab(session, {}, g, () => {}, () => {}, m => shown.push(m && { ...m }), i => selected.push(i), null, () => false, () => disabled);
   return { g, shown, selected,
     event: (name, time) => listeners[name]({ inputSource: source, frame: { predictedDisplayTime: time } }),
     frame: (time, y = 0, tracked = true) => update({ getPose: () => tracked ? { transform: { position: { x: 0, y, z: -1 } } } : null }, time),
@@ -157,26 +157,27 @@ test('quick quiet grab opens on Cancel; second grab motion selects without movin
   const h = menuHarness();
   h.event('selectstart', 0); h.frame(0); h.event('selectend', 100);
   h.event('selectstart', 200); h.frame(200);
-  assert.equal(h.shown.at(-1).selected, 2);
-  h.frame(220, 0.05); assert.equal(h.shown.at(-1).selected, 1);
-  h.frame(230, 0.09); assert.equal(h.shown.at(-1).selected, 0);
+  assert.equal(h.shown.at(-1).selected, 3);
+  h.frame(210, 0.045); assert.equal(h.shown.at(-1).selected, 2);
+  h.frame(220, 0.09); assert.equal(h.shown.at(-1).selected, 1);
+  h.frame(230, 0.135); assert.equal(h.shown.at(-1).selected, 0);
   assert.deepEqual(h.g.position, [0, 0, -2]);
-  h.frame(240, 0); assert.equal(h.shown.at(-1).selected, 2);
+  h.frame(240, 0); assert.equal(h.shown.at(-1).selected, 3);
   h.event('selectend', 250);
-  assert.deepEqual(h.selected, [2]); assert.equal(h.shown.at(-1), null);
+  assert.deepEqual(h.selected, [3]); assert.equal(h.shown.at(-1), null);
 });
 
 test('immediate second release cancels even before a frame; config and debug selection also close context menu', () => {
   const h = menuHarness();
   h.event('selectstart', 0); h.frame(0); h.event('selectend', 100);
   h.event('selectstart', 200); h.event('selectend', 201);
-  assert.deepEqual(h.selected, [2]);
+  assert.deepEqual(h.selected, [3]);
   h.event('selectstart', 300); h.frame(300); h.event('selectend', 350);
-  h.event('selectstart', 400); h.frame(400); h.frame(420, 0.05); h.event('selectend', 450);
-  assert.deepEqual(h.selected, [2, 1]); assert.equal(h.shown.at(-1), null);
+  h.event('selectstart', 400); h.frame(400); h.frame(420, 0.09); h.event('selectend', 450);
+  assert.deepEqual(h.selected, [3, 1]); assert.equal(h.shown.at(-1), null);
   h.event('selectstart', 500); h.frame(500); h.event('selectend', 550);
-  h.event('selectstart', 600); h.frame(600); h.frame(620, 0.09); h.event('selectend', 650);
-  assert.deepEqual(h.selected, [2, 1, 0]); assert.equal(h.shown.at(-1), null);
+  h.event('selectstart', 600); h.frame(600); h.frame(620, 0.135); h.event('selectend', 650);
+  assert.deepEqual(h.selected, [3, 1, 0]); assert.equal(h.shown.at(-1), null);
 });
 
 test('long, moved, delayed and tracking-lost grabs do not arm a menu', () => {
@@ -336,3 +337,17 @@ test('flipped gesture does not select if pause is too long or second grab moves'
   assert.equal(feedbackMeta?.isPointSelected, false);
 });
 
+
+test('disabled mode rows cannot commit, while Cancel remains selectable', () => {
+  for (const [disabled, y] of [[[1], 0.09], [[2], 0.045]]) {
+    const h = menuHarness(disabled);
+    h.event('selectstart', 0); h.frame(0); h.event('selectend', 100);
+    h.event('selectstart', 200); h.frame(200); h.frame(220, y);
+    h.event('selectend', 250);
+    assert.deepEqual(h.selected, []);
+    h.event('selectstart', 300); h.frame(300); h.event('selectend', 350);
+    h.event('selectstart', 400); h.frame(400); h.frame(420, y); h.frame(430, 0);
+    h.event('selectend', 450);
+    assert.deepEqual(h.selected, [3]);
+  }
+});

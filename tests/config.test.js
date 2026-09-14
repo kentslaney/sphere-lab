@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spreadFromSlider, spreadToSlider, XRConfig } from '../web/config.js';
-import { menuHeight, menuVertices, MENU_ITEMS, getMenuItems } from '../web/xr-menu.js';
+import { menuHeight, menuVertices, MENU_ITEMS, getMenuItems, disabledMenuIndices } from '../web/xr-menu.js';
 import { attachCloudGrab, CloudGrab } from '../web/xr-grab.js';
 
 test('depth spread spans 0.25 to 4 logarithmically with 1 at the midpoint', () => {
@@ -45,7 +45,7 @@ test('config tracking interruption and multiple grabs do not toggle settings', (
 });
 
 test('VR context menu has config, debug/reset, centers/surface, and Cancel; expanded texture quad retains correct aspect ratio', () => {
-  assert.deepEqual(MENU_ITEMS, ['config', 'debug', 'Cancel']);
+  assert.deepEqual(MENU_ITEMS, ['config', 'debug', 'centers', 'Cancel']);
   assert.deepEqual(getMenuItems(false, false), ['config', 'debug', 'centers', 'Cancel']);
   assert.deepEqual(getMenuItems(true, false), ['config', 'reset', 'centers', 'Cancel']);
   assert.deepEqual(getMenuItems(false, true), ['config', 'debug', 'surface', 'Cancel']);
@@ -82,4 +82,10 @@ test('unpressed target rays hover over config and scene remains frozen without h
   assert.equal(panel.selected, 1); assert.equal(changes, 0);
   update({getPose:()=>null}); assert.equal(panel.selected, -1); assert.equal(changes, 0);
   assert.deepEqual(grab.position,[0,0,-2]);
+});
+
+test('debug and centers disable the conflicting mode but leave Cancel enabled', () => {
+  assert.deepEqual(disabledMenuIndices(false, false), []);
+  assert.deepEqual(disabledMenuIndices(true, false), [2]);
+  assert.deepEqual(disabledMenuIndices(false, true), [1]);
 });

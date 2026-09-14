@@ -1,4 +1,4 @@
-export const MENU_ITEMS = ['config', 'debug', 'Cancel'];
+export const MENU_ITEMS = ['config', 'debug', 'centers', 'Cancel'];
 export const getMenuItems = (debug = false, centers = false) => [
   'config',
   debug ? 'reset' : 'debug',
@@ -6,7 +6,10 @@ export const getMenuItems = (debug = false, centers = false) => [
   'Cancel'
 ];
 export const MENU_WIDTH = 512;
-export const MENU_HEIGHT = 320;
+export const MENU_HEIGHT = 32 + MENU_ITEMS.length * 96;
+export const disabledMenuIndices = (debug = false, centers = false) => [
+  ...(centers ? [1] : []), ...(debug ? [2] : [])
+];
 
 // Canvas owns all menu styling and text; WGSL samples the exported RGBA texture.
 export function menuPixels(selected, items = MENU_ITEMS, hint = '', disabledIndices = []) {
@@ -34,7 +37,7 @@ export function menuPixels(selected, items = MENU_ITEMS, hint = '', disabledIndi
 export const menuHeight = (items = MENU_ITEMS, hint = '') => 32 + items.length * 96 + (hint ? 48 : 0);
 
 // A world-space billboard, anchored at the second grab with Cancel at hand height.
-export function menuVertices(origin, viewer, textureHeight = MENU_HEIGHT, anchorRow = 2, fixedRight = null) {
+export function menuVertices(origin, viewer, textureHeight = MENU_HEIGHT, anchorRow = MENU_ITEMS.length - 1, fixedRight = null) {
   const dx = viewer[0] - origin[0], dz = viewer[2] - origin[2];
   const length = Math.hypot(dx, dz);
   const right = fixedRight ?? (length > 1e-5 ? [dz / length, 0, -dx / length] : [1, 0, 0]);

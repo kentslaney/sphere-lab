@@ -494,7 +494,7 @@ export function grabLevelCurveLines(depth, range, spread = 1, grabPositions = []
       const centerRes = centerEstimateAt(closest, level, grad, rotated, range, spread);
       if (centerRes && centerRes.isConvex && centerRes.center3D) {
         const c3 = centerRes.center3D;
-        const lineColor = [1.0, 0.75, 0.2];
+        const lineColor = [0.35, 0.55, 1.0];
         out.push(
           closest[0], closest[1], closest[2], ...lineColor,
           c3[0], c3[1], c3[2], ...lineColor

@@ -1,7 +1,7 @@
 import { attachViewportActivation } from './viewport-activation.js';
 import { raycastDistance, solveTouchCamera, wheelTranslation } from './viewport-navigation.js';
 import { XRConfig } from './config.js';
-import { menuPixels, menuVertices, menuHeight, MENU_WIDTH, MENU_HEIGHT, getMenuItems } from './xr-menu.js';
+import { menuPixels, menuVertices, menuHeight, MENU_WIDTH, MENU_HEIGHT, getMenuItems, disabledMenuIndices } from './xr-menu.js';
 import { grabFeedbackVertices, buildDebugSphereVertices } from './xr-feedback.js';
 import { CloudGrab, attachCloudGrab, rotate } from './xr-grab.js';
 
@@ -285,7 +285,7 @@ export async function createViewer(canvas, button, status, options = {}) {
             }, menu => {
               if (!menu) { renderer.set_menu(new Float32Array()); return; }
               const items = getMenuItems(debugMode, centersActive);
-              const disabled = centersActive ? [1] : [];
+              const disabled = disabledMenuIndices(debugMode, centersActive);
               const menuKey = `${menu.selected}_${debugMode}_${centersActive}`;
               const height = menuHeight(items);
               if (menuKey !== menuSelection) {
@@ -295,6 +295,7 @@ export async function createViewer(canvas, button, status, options = {}) {
               menuOrigin = [...menu.origin];
               renderer.set_menu(menuVertices(menu.origin, currentViewerPos, height, items.length - 1));
             }, selected => {
+              if (disabledMenuIndices(debugMode, centersActive).includes(selected)) return;
               if (selected === 0) {
                 const dx = currentViewerPos[0] - menuOrigin[0], dz = currentViewerPos[2] - menuOrigin[2];
                 const length = Math.hypot(dx, dz);
@@ -306,7 +307,7 @@ export async function createViewer(canvas, button, status, options = {}) {
                 centersActive = !centersActive;
                 menuSelection = '';
               }
-            }, config, () => debugMode);
+            }, config, () => debugMode, () => disabledMenuIndices(debugMode, centersActive));
             function frame(time, xrFrame) {
               if (session !== active || stopped) return;
               // Request next frame at the start so visionOS compositor watchdog never times out
