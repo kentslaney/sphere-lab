@@ -1,4 +1,5 @@
 export const MENU_ITEMS = ['config', 'debug', 'Cancel'];
+export const getMenuItems = (debug = false) => ['config', debug ? 'reset' : 'debug', 'Cancel'];
 export const MENU_WIDTH = 512;
 export const MENU_HEIGHT = 320;
 

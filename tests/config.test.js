@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spreadFromSlider, spreadToSlider, XRConfig } from '../web/config.js';
-import { menuHeight, menuVertices, MENU_ITEMS } from '../web/xr-menu.js';
+import { menuHeight, menuVertices, MENU_ITEMS, getMenuItems } from '../web/xr-menu.js';
 import { attachCloudGrab, CloudGrab } from '../web/xr-grab.js';
 
 test('depth spread spans 0.25 to 4 logarithmically with 1 at the midpoint', () => {
@@ -46,6 +46,8 @@ test('config tracking interruption and multiple grabs do not toggle settings', (
 
 test('VR context menu has config, debug, and Cancel; expanded texture quad retains correct aspect ratio', () => {
   assert.deepEqual(MENU_ITEMS, ['config', 'debug', 'Cancel']);
+  assert.deepEqual(getMenuItems(false), ['config', 'debug', 'Cancel']);
+  assert.deepEqual(getMenuItems(true), ['config', 'reset', 'Cancel']);
   const height = menuHeight(['Depth spread', 'Minimum score', 'Show detections', 'Done'], 'Hint');
   const vertices = menuVertices([0,0,-1], [0,0,0], height, 3);
   assert.equal(vertices.length, 30); assert.ok(vertices.every(Number.isFinite));

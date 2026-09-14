@@ -55,27 +55,61 @@ export function attachCloudGrab(session, space, grab, apply, feedback = () => {}
   const origins = new Map();
   let lastHandCount = 0;
   let candidate = null, pending = null, activeMenu = null;
+  let debugLongPending = null, debugShortCandidate = null, isPointSelected = false;
   const now = event => event.frame?.predictedDisplayTime ?? performance.now();
   const closeMenu = (commit = false) => {
     const selected = activeMenu?.selected;
     activeMenu = null; menu(null);
     if (selected !== undefined && commit) select(selected);
   };
-  const hide = () => { origins.clear(); lastHandCount = 0; feedback([], { isSingleDebugGrab: false }); };
+  const hide = () => {
+    origins.clear();
+    lastHandCount = 0;
+    const debugActive = typeof isDebug === 'function' ? isDebug() : Boolean(isDebug);
+    feedback([], {
+      isSingleDebugGrab: false,
+      isPointSelected,
+      isPendingPause: Boolean(debugActive && debugLongPending)
+    });
+  };
   const start = event => {
     if (held.has(event.inputSource)) return;
     const time = now(event);
-    if (config?.isOpen) { held.add(event.inputSource); candidate = null; pending = null; return; }
+    const debugActive = typeof isDebug === 'function' ? isDebug() : Boolean(isDebug);
+    if (!debugActive) {
+      isPointSelected = false; debugLongPending = null; debugShortCandidate = null;
+    }
+    if (config?.isOpen) {
+      held.add(event.inputSource);
+      candidate = null; pending = null;
+      debugLongPending = null; debugShortCandidate = null;
+      return;
+    }
     if (!held.size && pending && time - pending.time <= 350 && time >= pending.time) {
       activeMenu = { source: event.inputSource, origin: null, selected: 2 };
       candidate = null;
+      debugLongPending = null; debugShortCandidate = null;
       grab.release();
+    } else if (debugActive && !held.size && debugLongPending && time - debugLongPending.time <= 350 && time >= debugLongPending.time) {
+      debugShortCandidate = { source: event.inputSource, time, origin: null, moved: false };
+      candidate = { source: event.inputSource, time, origin: null, moved: false };
+      debugLongPending = null;
     } else {
+      if (debugActive && isPointSelected) {
+        isPointSelected = false;
+      }
+      debugShortCandidate = null;
+      debugLongPending = null;
       candidate = held.size ? null : { source: event.inputSource, time, origin: null, moved: false };
     }
     pending = null;
     held.add(event.inputSource);
-    if (held.size > 1) { candidate = null; closeMenu(); }
+    if (held.size > 1) {
+      candidate = null;
+      debugShortCandidate = null;
+      debugLongPending = null;
+      closeMenu();
+    }
   };
   const remove = source => {
     // Other transient inputs must not rebase an ongoing grab and discard motion.
@@ -86,16 +120,44 @@ export function attachCloudGrab(session, space, grab, apply, feedback = () => {}
   };
   const end = event => {
     const source = event.inputSource, time = now(event);
+    const debugActive = typeof isDebug === 'function' ? isDebug() : Boolean(isDebug);
     if (config?.isOpen) config.end(source);
     else if (activeMenu?.source === source) closeMenu(true);
+    else if (debugActive && debugShortCandidate?.source === source && debugShortCandidate.origin && !debugShortCandidate.moved && time - debugShortCandidate.time <= 250 && held.size === 1) {
+      isPointSelected = true;
+      debugShortCandidate = null;
+      debugLongPending = null;
+      pending = null;
+    }
     else if (candidate?.source === source && candidate.origin && !candidate.moved && time - candidate.time <= 250 && held.size === 1) {
       pending = { time };
+      debugLongPending = null;
     }
+    else if (debugActive && candidate?.source === source && held.size === 1 && (candidate.moved || time - candidate.time > 250)) {
+      debugLongPending = { time };
+      pending = null;
+    }
+    if (debugShortCandidate?.source === source) debugShortCandidate = null;
     if (candidate?.source === source) candidate = null;
     remove(source);
   };
-  const changed = event => { for (const source of event.removed) { if (held.has(source)) { candidate = null; pending = null; closeMenu(); config?.cancelGrab(); } remove(source); } };
-  const clear = () => { config?.close(); candidate = null; pending = null; closeMenu(); held.clear(); grab.release(); hide(); };
+  const changed = event => {
+    for (const source of event.removed) {
+      if (held.has(source)) {
+        candidate = null; pending = null;
+        debugLongPending = null; debugShortCandidate = null;
+        closeMenu(); config?.cancelGrab();
+      }
+      remove(source);
+    }
+  };
+  const clear = () => {
+    config?.close();
+    candidate = null; pending = null;
+    debugLongPending = null; debugShortCandidate = null;
+    isPointSelected = false;
+    closeMenu(); held.clear(); grab.release(); hide();
+  };
   session.addEventListener('selectstart', start);
   session.addEventListener('selectend', end);
   session.addEventListener('inputsourceschange', changed);
@@ -126,10 +188,21 @@ export function attachCloudGrab(session, space, grab, apply, feedback = () => {}
       hands.set(source, position);
     }
     if (config?.isOpen) { config.update(hands, held); grab.release(); hide(); return; }
+    const debugActive = typeof isDebug === 'function' ? isDebug() : Boolean(isDebug);
+    if (!debugActive) {
+      isPointSelected = false; debugLongPending = null; debugShortCandidate = null;
+    }
+    if (debugLongPending && time - debugLongPending.time > 350) {
+      debugLongPending = null;
+      if (!isPointSelected) {
+        feedback([], { isSingleDebugGrab: false, isPointSelected: false, isPendingPause: false });
+      }
+    }
     if (hands.size === 0) {
       if (held.size > 0) {
         config?.cancelGrab();
         candidate = null; pending = null; closeMenu();
+        debugLongPending = null; debugShortCandidate = null;
         grab.release();
         hide();
       }
@@ -141,6 +214,14 @@ export function attachCloudGrab(session, space, grab, apply, feedback = () => {}
       else {
         candidate.origin ??= [...p];
         candidate.moved ||= Math.hypot(...p.map((v, i) => v - candidate.origin[i])) > 0.02;
+      }
+    }
+    if (debugShortCandidate) {
+      const p = hands.get(debugShortCandidate.source);
+      if (!p) debugShortCandidate = null;
+      else {
+        debugShortCandidate.origin ??= [...p];
+        debugShortCandidate.moved ||= Math.hypot(...p.map((v, i) => v - debugShortCandidate.origin[i])) > 0.02;
       }
     }
     if (activeMenu) {
@@ -187,12 +268,21 @@ export function attachCloudGrab(session, space, grab, apply, feedback = () => {}
       return { ...rec, position, elapsed: time - rec.startedAt };
     });
 
-    const debugActive = typeof isDebug === 'function' ? isDebug() : Boolean(isDebug);
+    const isPendingPause = Boolean(debugActive && debugLongPending && time - debugLongPending.time <= 350);
     if (debugActive && activeEntries.length === 1) {
       grab.release();
-      feedback(markers, { isSingleDebugGrab: true });
+      const isShortTapping = Boolean(debugShortCandidate && !debugShortCandidate.moved && time - debugShortCandidate.time <= 250);
+      feedback(markers, {
+        isSingleDebugGrab: !isShortTapping,
+        isPointSelected,
+        isPendingPause: isShortTapping || isPendingPause
+      });
     } else {
-      feedback(markers, { isSingleDebugGrab: false });
+      feedback(markers, {
+        isSingleDebugGrab: false,
+        isPointSelected,
+        isPendingPause
+      });
       if (grab.update(hands)) apply();
     }
   };

@@ -280,7 +280,7 @@ function pushMidpointTextBox(vertices, midpoint, text, viewerPos = [0, 0, 0]) {
  *   with a lighter text box highlight rendered in front of the line displaying
  *   the updated scaled distance.
  */
-export function grabFeedbackVertices(markers, viewerPos = [0, 0, 0], closestPointWorld = null, isSingleDebugGrab = false) {
+export function grabFeedbackVertices(markers, viewerPos = [0, 0, 0], closestPointWorld = null, isSingleDebugGrab = false, isPointSelected = false) {
   const vertices = [];
   if (isSingleDebugGrab && markers.length === 1) {
     const marker = markers[0];
@@ -297,6 +297,12 @@ export function grabFeedbackVertices(markers, viewerPos = [0, 0, 0], closestPoin
     const beadCenter = marker.position.map((v, i) => v + (target[i] - v) * progress);
     pushSphere(vertices, beadCenter, 0.009, color, 1.0);
 
+    return new Float32Array(vertices);
+  }
+
+  // When point is selected and no hands are held, keep solid interior bead rendered
+  if (isPointSelected && closestPointWorld && markers.length === 0) {
+    pushSphere(vertices, closestPointWorld, 0.009, [1, 1, 1], 1.0);
     return new Float32Array(vertices);
   }
 
@@ -332,6 +338,11 @@ export function grabFeedbackVertices(markers, viewerPos = [0, 0, 0], closestPoin
 
     // Render midpoint text box in front of the line
     pushMidpointTextBox(vertices, midpoint, text, viewerPos);
+
+    // If point is selected, keep solid bead rendered during two-hand navigation
+    if (isPointSelected && closestPointWorld) {
+      pushSphere(vertices, closestPointWorld, 0.009, [1, 1, 1], 1.0);
+    }
   }
 
   return new Float32Array(vertices);

@@ -134,3 +134,17 @@ test('single debug grab renders translucent shell at grab point and solid bead a
     assert.ok(Math.abs(vertices[i + 6] - 1.0) < 1e-5);
   }
 });
+
+test('selected point with no active markers renders solid bead at closest point', () => {
+  const closest = [0.5, 0.6, -1.2];
+  const vertices = grabFeedbackVertices([], [0, 0, 0], closest, false, true);
+
+  assert.ok(vertices.length > 0);
+  assert.equal(vertices.length % 21, 0);
+  for (let i = 0; i < vertices.length; i += 7) {
+    const d = Math.hypot(vertices[i] - closest[0], vertices[i + 1] - closest[1], vertices[i + 2] - closest[2]);
+    assert.ok(Math.abs(d - 0.009) < 1e-5);
+    assert.ok(Math.abs(vertices[i + 6] - 1.0) < 1e-5);
+  }
+});
+

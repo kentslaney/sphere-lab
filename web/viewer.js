@@ -1,7 +1,7 @@
 import { attachViewportActivation } from './viewport-activation.js';
 import { raycastDistance, solveTouchCamera, wheelTranslation } from './viewport-navigation.js';
 import { XRConfig } from './config.js';
-import { menuPixels, menuVertices, menuHeight, MENU_WIDTH, MENU_HEIGHT } from './xr-menu.js';
+import { menuPixels, menuVertices, menuHeight, MENU_WIDTH, MENU_HEIGHT, getMenuItems } from './xr-menu.js';
 import { grabFeedbackVertices, buildDebugSphereVertices } from './xr-feedback.js';
 import { CloudGrab, attachCloudGrab, rotate } from './xr-grab.js';
 
@@ -237,10 +237,15 @@ export async function createViewer(canvas, button, status, options = {}) {
             applyGrab();
             renderer.set_hud(new Float32Array());
             let currentViewerPos = [0, 0, 0];
-            let menuSelection = -1, menuOrigin = [0, 0, -1], configTexture = '';
+            let menuSelection = '', menuOrigin = [0, 0, -1], configTexture = '';
             let configWasOpen = false;
+            let lastClosestModel = null;
+            let isSelected = false;
+
             const updateGrab = attachCloudGrab(active, space, grab, applyGrab, (markers, meta = {}) => {
               const isSingleDebugGrab = Boolean(meta.isSingleDebugGrab && markers.length === 1);
+              isSelected = Boolean(meta.isPointSelected);
+              const keepFrozen = isSelected || Boolean(meta.isPendingPause);
               let closestPointWorld = null;
 
               if (isSingleDebugGrab) {
@@ -253,21 +258,29 @@ export async function createViewer(canvas, button, status, options = {}) {
 
                 const closestModel = renderer.update_grab_level_curve(modelPos[0], modelPos[1], modelPos[2]);
                 if (closestModel && closestModel.length >= 3) {
+                  lastClosestModel = [...closestModel];
                   const scaledPt = [closestModel[0] * grab.scale, closestModel[1] * grab.scale, closestModel[2] * grab.scale];
                   const rotPt = rotate(grab.rotation, scaledPt);
                   closestPointWorld = [rotPt[0] + grab.position[0], rotPt[1] + grab.position[1], rotPt[2] + grab.position[2]];
                 }
+              } else if (keepFrozen && lastClosestModel) {
+                const scaledPt = [lastClosestModel[0] * grab.scale, lastClosestModel[1] * grab.scale, lastClosestModel[2] * grab.scale];
+                const rotPt = rotate(grab.rotation, scaledPt);
+                closestPointWorld = [rotPt[0] + grab.position[0], rotPt[1] + grab.position[1], rotPt[2] + grab.position[2]];
               } else {
                 renderer.clear_grab_level_curve();
+                lastClosestModel = null;
               }
 
-              const feedback = grabFeedbackVertices(markers, currentViewerPos, closestPointWorld, isSingleDebugGrab);
+              const feedback = grabFeedbackVertices(markers, currentViewerPos, closestPointWorld, isSingleDebugGrab, keepFrozen);
               renderer.set_grab_feedback(feedback);
             }, menu => {
               if (!menu) { renderer.set_menu(new Float32Array()); return; }
-              if (menu.selected !== menuSelection) {
-                renderer.set_menu_texture(menuPixels(menu.selected), MENU_WIDTH, MENU_HEIGHT);
-                menuSelection = menu.selected;
+              const items = getMenuItems(debugMode);
+              const menuKey = `${menu.selected}_${debugMode}`;
+              if (menuKey !== menuSelection) {
+                renderer.set_menu_texture(menuPixels(menu.selected, items), MENU_WIDTH, MENU_HEIGHT);
+                menuSelection = menuKey;
               }
               menuOrigin = [...menu.origin];
               renderer.set_menu(menuVertices(menu.origin, currentViewerPos));
@@ -276,7 +289,7 @@ export async function createViewer(canvas, button, status, options = {}) {
                 const dx = currentViewerPos[0] - menuOrigin[0], dz = currentViewerPos[2] - menuOrigin[2];
                 const length = Math.hypot(dx, dz);
                 config.open(menuOrigin, length > 1e-5 ? [dz / length, 0, -dx / length] : [1, 0, 0]);
-                configTexture = ''; menuSelection = -1;
+                configTexture = ''; menuSelection = '';
               } else if (selected === 1) {
                 options.onDebug?.();
               }
@@ -480,6 +493,7 @@ export async function createViewer(canvas, button, status, options = {}) {
         renderer.set_pose(0, 0, 0);
         renderer.set_grab(0, 0, 0, 1);
         renderer.set_grab_rotation(new Float32Array(modelRotation));
+        renderer.clear_grab_level_curve?.();
         renderer.set_grab_feedback(new Float32Array());
         renderer.set_hud(new Float32Array());
         notifyPose();
@@ -490,10 +504,17 @@ export async function createViewer(canvas, button, status, options = {}) {
         renderer.set_cloud(new Float32Array());
         renderer.set_lines(new Float32Array());
         renderer.set_hud(new Float32Array());
+        renderer.clear_grab_level_curve?.();
         renderer.set_grab_feedback(new Float32Array());
       },
       getCamera: getCameraState,
-      setDebug: enabled => { debugMode = Boolean(enabled); },
+      setDebug: enabled => {
+        debugMode = Boolean(enabled);
+        if (!debugMode) {
+          renderer.clear_grab_level_curve?.();
+          renderer.set_grab_feedback(new Float32Array());
+        }
+      },
       setDepthMap: (depth, minDepth, maxDepth, spread) => {
         renderer.set_depth_map(depth, minDepth, maxDepth, spread);
       },

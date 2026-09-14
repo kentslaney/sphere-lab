@@ -236,3 +236,103 @@ test('debug mode suppresses navigation for single grab and enables it for double
   assert.ok(changes > 0);
   assert.equal(feedbackMeta?.isSingleDebugGrab, false);
 });
+
+test('flipped gesture (long grab, short pause, short grab) selects point in debug mode and resets on next single grab', () => {
+  const listeners = {};
+  const session = { visibilityState: 'visible', addEventListener: (name, fn) => listeners[name] = fn };
+  const g = new CloudGrab();
+  let feedbackMeta = null;
+  const a = { gripSpace: { x: 0, y: 0 } };
+  const frame = (time, x = 0, y = 0) => update({
+    getPose: () => ({ transform: { position: { x, y, z: -1 } } })
+  }, time);
+
+  const update = attachCloudGrab(
+    session, {}, g, () => {},
+    (markers, meta) => { feedbackMeta = meta; },
+    () => {}, () => {}, null,
+    () => true
+  );
+
+  const event = (name, time) => listeners[name]({
+    inputSource: a,
+    frame: { predictedDisplayTime: time }
+  });
+
+  // Step 1: Long grab (duration 300ms > 250ms)
+  event('selectstart', 0);
+  frame(0, 0, 0);
+  frame(150, 0, 0);
+  event('selectend', 300);
+  assert.equal(feedbackMeta?.isPointSelected, false);
+  assert.equal(feedbackMeta?.isPendingPause, true);
+
+  // Step 2: Short pause (100ms <= 350ms) then short grab (100ms <= 250ms, unmoved)
+  event('selectstart', 400);
+  frame(400, 0, 0);
+  frame(450, 0, 0);
+  event('selectend', 500);
+
+  // Point is selected!
+  assert.equal(feedbackMeta?.isPointSelected, true);
+
+  // Frame with hands released keeps isPointSelected = true
+  frame(600, 0, 0);
+  // When hands.size === 0 and point is selected, isPointSelected remains true
+  assert.equal(feedbackMeta?.isPointSelected, true);
+
+  // Step 3: Another single grab resets selection
+  event('selectstart', 700);
+  frame(700, 0, 0);
+  assert.equal(feedbackMeta?.isPointSelected, false);
+  assert.equal(feedbackMeta?.isSingleDebugGrab, true);
+  event('selectend', 800);
+});
+
+test('flipped gesture does not select if pause is too long or second grab moves', () => {
+  const listeners = {};
+  const session = { visibilityState: 'visible', addEventListener: (name, fn) => listeners[name] = fn };
+  const g = new CloudGrab();
+  let feedbackMeta = null;
+  const a = { gripSpace: { x: 0, y: 0 } };
+  const frame = (time, x = 0, y = 0) => update({
+    getPose: () => ({ transform: { position: { x, y, z: -1 } } })
+  }, time);
+
+  const update = attachCloudGrab(
+    session, {}, g, () => {},
+    (markers, meta) => { feedbackMeta = meta; },
+    () => {}, () => {}, null,
+    () => true
+  );
+
+  const event = (name, time) => listeners[name]({
+    inputSource: a,
+    frame: { predictedDisplayTime: time }
+  });
+
+  // Case A: Pause too long (400ms > 350ms)
+  event('selectstart', 0);
+  frame(0, 0, 0);
+  event('selectend', 300);
+  // Pause 400ms until 700
+  frame(660, 0, 0); // 360ms after release -> debugLongPending expires
+  assert.equal(feedbackMeta?.isPendingPause, false);
+
+  event('selectstart', 700);
+  frame(700, 0, 0);
+  event('selectend', 800);
+  assert.equal(feedbackMeta?.isPointSelected, false);
+
+  // Case B: Second grab moved (> 0.02m)
+  event('selectstart', 1000);
+  frame(1000, 0, 0);
+  event('selectend', 1300); // long grab ends at 1300
+
+  event('selectstart', 1400); // 100ms pause
+  frame(1400, 0, 0);
+  frame(1450, 0.05, 0); // moved 0.05m
+  event('selectend', 1500);
+  assert.equal(feedbackMeta?.isPointSelected, false);
+});
+
