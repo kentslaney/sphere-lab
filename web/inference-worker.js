@@ -85,14 +85,15 @@ onmessage=async ({data:{id,type,rgba,depth:provided,debug,isExample}})=>{
         if(rotated) runtime._free(rotated);
         throw new Error('Curvature memory allocation failed.');
       }
-      const disparity = new Float32Array(depth.length);
-      for (let i = 0; i < depth.length; i++) disparity[i] = 1.0 / Math.max(1e-6, depth[i]);
-      runtime.HEAPF32.set(disparity, input / 4);
-      if (runtime._sphere_run_curvature(input, disparity.length, grad, rotated)) throw new Error(runtime.UTF8ToString(runtime._sphere_error()));
-      const gradValues = runtime.HEAPF32.slice(grad / 4, grad / 4 + WIDTH * HEIGHT * 2);
-      const rotatedValues = runtime.HEAPF32.slice(rotated / 4, rotated / 4 + WIDTH * HEIGHT * 4);
-      postMessage({ id, type: 'curvature', grad: gradValues, rotated: rotatedValues, elapsed: performance.now() - start }, [gradValues.buffer, rotatedValues.buffer]);
-      return;
+      try {
+        const disparity = new Float32Array(depth.length);
+        for (let i = 0; i < depth.length; i++) disparity[i] = 1.0 / Math.max(1e-6, depth[i]);
+        runtime.HEAPF32.set(disparity, input / 4);
+        if (runtime._sphere_run_curvature(input, disparity.length, grad, rotated)) throw new Error(runtime.UTF8ToString(runtime._sphere_error()));
+        const gradValues = runtime.HEAPF32.slice(grad / 4, grad / 4 + WIDTH * HEIGHT * 2);
+        const rotatedValues = runtime.HEAPF32.slice(rotated / 4, rotated / 4 + WIDTH * HEIGHT * 4);
+        postMessage({ id, type: 'curvature', grad: gradValues, rotated: rotatedValues, elapsed: performance.now() - start }, [gradValues.buffer, rotatedValues.buffer]);
+        return;
       } finally {
         runtime._free(input);
         runtime._free(grad);
