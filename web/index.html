@@ -16,7 +16,7 @@
       <div class="actions"><button id="example">Try example photo</button><button id="cancel" hidden>Cancel</button></div>
       <p id="filename" class="small">Files stay in this browser. Only model and runtime files are downloaded.</p>
       <p class="small muted">The center is cropped to 518 × 392 to preserve the detector’s aspect ratio. The preview shows exactly what is analyzed.</p>
-      <div class="previews"><figure><canvas id="photo" width="518" height="392"></canvas><figcaption>Analysis crop</figcaption></figure><figure><canvas id="depth" width="518" height="392"></canvas><figcaption>Relative inverse depth · brighter = nearer</figcaption></figure></div>
+      <div class="previews"><figure><canvas id="photo" width="518" height="392"></canvas><figcaption>Analysis crop</figcaption></figure><figure><canvas id="depth" width="518" height="392"></canvas><figcaption>Relative depth · brighter = nearer</figcaption></figure></div>
       <div class="eyebrow">02 / INFERENCE</div>
       <ol class="stages"><li id="stage-depth">Depth Anything V2 <span>ONNX · WebGPU</span></li><li id="stage-cloud">Point cloud <span>Rust wgpu · Wasm</span></li><li id="stage-detect">Sphere detector <span>StableHLO → IREE · Wasm CPU</span></li></ol>
       <p id="status" role="status" aria-live="polite">Choose an image to begin.</p>

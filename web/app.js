@@ -42,6 +42,11 @@ function rebuild(updateCloud=true) {
   photo.font='bold 15px system-ui';
   if($('outlines').checked) for(const d of selected){
     photo.strokeRect(d.x0,d.y0,d.x1-d.x0,d.y1-d.y0);
+    const cx=(d.x0+d.x1)/2, cy=(d.y0+d.y1)/2;
+    const r=((d.x1-d.x0)+(d.y1-d.y0))/4;
+    photo.beginPath();
+    photo.arc(cx,cy,r,0,2*Math.PI);
+    photo.stroke();
     photo.fillStyle='#ffcc66';photo.fillText(`#${d.id+1}  ${d.score.toFixed(3)}`,Math.max(2,d.x0),Math.max(17,d.y0-6));
   }
   $('results').replaceChildren();
@@ -61,7 +66,7 @@ function paintDepth() {
   range=depthRange(depth);
   const image=depthCanvas.createImageData(WIDTH,HEIGHT),[lo,hi]=range;
   for(let i=0;i<depth.length;i++){
-    const t=Math.max(0,Math.min(1,(depth[i]-lo)/Math.max(1e-6,hi-lo)));
+    const t=Math.max(0,Math.min(1,(hi-depth[i])/Math.max(1e-6,hi-lo)));
     image.data[i*4]=Math.round(25+230*t);
     image.data[i*4+1]=Math.round(30+200*Math.sqrt(t));
     image.data[i*4+2]=Math.round(90+90*(1-t));image.data[i*4+3]=255;

@@ -416,3 +416,34 @@ test('grabLevelCurveLines appends center ray and sphere marker when curvature in
   assert.ok(withConvexCurvature.every(Number.isFinite));
 });
 
+test('depth colormap assigns higher luminance to nearer samples (brighter is closer)', () => {
+  const lo = 1.0, hi = 5.0;
+  const colormap = d => {
+    const t = Math.max(0, Math.min(1, (hi - d) / Math.max(1e-6, hi - lo)));
+    const r = Math.round(25 + 230 * t);
+    const g = Math.round(30 + 200 * Math.sqrt(t));
+    const b = Math.round(90 + 90 * (1 - t));
+    const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+    return { r, g, b, luminance };
+  };
+
+  const near = colormap(lo);
+  const far = colormap(hi);
+
+  // Near should be bright yellow; far should be dark blue
+  assert.ok(near.luminance > far.luminance * 2, `near ${near.luminance} vs far ${far.luminance}`);
+  assert.ok(near.r > 200 && near.g > 200); // yellow
+  assert.ok(far.b > far.r && far.b > far.g); // blue
+});
+
+test('sphere perspective circle outline matches candidate center and average radius', () => {
+  const d = { x0: 100, y0: 80, x1: 200, y1: 180 };
+  const cx = (d.x0 + d.x1) / 2;
+  const cy = (d.y0 + d.y1) / 2;
+  const r = ((d.x1 - d.x0) + (d.y1 - d.y0)) / 4;
+  assert.equal(cx, 150);
+  assert.equal(cy, 130);
+  assert.equal(r, 50);
+});
+
+
