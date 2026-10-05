@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { raycastDistance, solveTouchCamera, wheelTranslation } from '../web/viewport-navigation.js';
+import { raycastDistance, solveTouchCamera, wheelTranslation, wheelRotation, wheelPan } from '../web/viewport-navigation.js';
 const basis = { right: [1, 0, 0], up: [0, 1, 0], forward: [0, 0, -1] };
 const norm = p => p.map(v => v / Math.hypot(...p));
 const near = (a, b) => a.forEach((v, i) => assert.ok(Math.abs(v - b[i]) < 1e-8, `${a} != ${b}`));
@@ -62,4 +62,32 @@ test('Shift scroll uses camera up instead of depth and preserves horizontal scro
   near(wheelTranslation({ deltaX: 10, deltaY: 20, deltaMode: 0, shiftKey: true }, basis, 500), [0.02, -0.04, 0]);
   const tilted = { right: [1, 0, 0], up: [0, 0.8, 0.6], forward: [0, 0.6, -0.8] };
   near(wheelTranslation({ deltaX: 0, deltaY: -1, deltaMode: 1, shiftKey: true }, tilted, 500), [0, 0.0256, 0.0192]);
+});
+
+test('holding space suppresses wheel translation', () => {
+  near(wheelTranslation({ deltaX: 10, deltaY: 20, deltaMode: 0, spaceKey: true }, basis, 500), [0, 0, 0]);
+  near(wheelTranslation({ deltaX: 10, deltaY: 20, deltaMode: 0, shiftKey: true, spaceKey: true }, basis, 500), [0, 0, 0]);
+});
+
+test('holding space while scrolling pans the camera (yaw and pitch)', () => {
+  near(wheelRotation({ deltaX: 10, deltaY: 20, deltaMode: 0, spaceKey: true }, 500), [0.02, -0.04, 0]);
+  near(wheelRotation({ deltaX: 1, deltaY: -1, deltaMode: 1, spaceKey: true }, 500), [0.032, 0.032, 0]);
+  near(wheelRotation({ deltaX: 0, deltaY: 1, deltaMode: 2, spaceKey: true }, 500), [0, -1, 0]);
+  const rot = wheelPan({ deltaX: 10, deltaY: 20, deltaMode: 0, spaceKey: true }, 500);
+  assert.equal(rot.yaw, 0.02);
+  assert.equal(rot.pitch, -0.04);
+  assert.equal(rot.roll, 0);
+});
+
+test('holding shift and space while scrolling controls roll on horizontal axis and pitch on vertical axis', () => {
+  near(wheelRotation({ deltaX: 10, deltaY: 20, deltaMode: 0, shiftKey: true, spaceKey: true }, 500), [0, -0.04, 0.02]);
+  near(wheelRotation({ deltaX: 1, deltaY: -1, deltaMode: 1, shiftKey: true, spaceKey: true }, 500), [0, 0.032, 0.032]);
+  const rot = wheelPan({ deltaX: 10, deltaY: 20, deltaMode: 0, shiftKey: true, spaceKey: true }, 500);
+  assert.equal(rot.yaw, 0);
+  assert.equal(rot.pitch, -0.04);
+  assert.equal(rot.roll, 0.02);
+});
+
+test('wheel rotation is zero when spaceKey is explicitly false', () => {
+  near(wheelRotation({ deltaX: 10, deltaY: 20, deltaMode: 0, spaceKey: false }, 500), [0, 0, 0]);
 });

@@ -1,5 +1,5 @@
 import { attachViewportActivation } from './viewport-activation.js';
-import { raycastDistance, solveTouchCamera, wheelTranslation } from './viewport-navigation.js';
+import { raycastDistance, solveTouchCamera, wheelTranslation, wheelRotation } from './viewport-navigation.js';
 import { XRConfig } from './config.js';
 import { menuPixels, menuVertices, menuHeight, MENU_WIDTH, MENU_HEIGHT, getMenuItems, disabledMenuIndices } from './xr-menu.js';
 import { grabFeedbackVertices, buildDebugSphereVertices } from './xr-feedback.js';
@@ -40,7 +40,7 @@ export async function createViewer(canvas, button, status, options = {}) {
     const grab = new CloudGrab();
 
     let camPos = [0, 0, 2];
-    let yaw = 0, pitch = 0;
+    let yaw = 0, pitch = 0, roll = 0;
     let drag = null;
     let cloudPoints = null, cloudStride = 6;
     let worldPoints = null, worldDirty = true;
@@ -56,8 +56,12 @@ export async function createViewer(canvas, button, status, options = {}) {
       const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
       const cosY = Math.cos(yaw), sinY = Math.sin(yaw);
       const forward = [-sinY * cosP, sinP, -cosY * cosP];
-      const right = [cosY, 0, -sinY];
-      const up = [sinY * sinP, cosP, cosY * sinP];
+      const r0 = [cosY, 0, -sinY];
+      const u0 = [sinY * sinP, cosP, cosY * sinP];
+      if (!roll) return { forward, right: r0, up: u0 };
+      const cosR = Math.cos(roll), sinR = Math.sin(roll);
+      const right = [cosR * r0[0] + sinR * u0[0], cosR * r0[1] + sinR * u0[1], cosR * r0[2] + sinR * u0[2]];
+      const up = [-sinR * r0[0] + cosR * u0[0], -sinR * r0[1] + cosR * u0[1], -sinR * r0[2] + cosR * u0[2]];
       return { forward, right, up };
     };
 
@@ -84,6 +88,7 @@ export async function createViewer(canvas, button, status, options = {}) {
     const getCameraState = () => ({
       yaw,
       pitch,
+      roll,
       distance: Math.hypot(...camPos),
       position: [...camPos],
       scale: grab.scale
@@ -417,8 +422,26 @@ export async function createViewer(canvas, button, status, options = {}) {
       return raycastDistance(worldPoints, camPos, rayDir, getCameraVectors().forward, canvasH, fFov, cloudStride);
     }
 
+    let spaceHeld = false;
+    const win = canvas.ownerDocument?.defaultView || (typeof window !== 'undefined' ? window : null);
+    win?.addEventListener('keydown', event => {
+      if (event.code === 'Space' || event.key === ' ' || event.keyCode === 32) {
+        if (event.target && (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA')) return;
+        spaceHeld = true;
+        if (acceptsInput() && (canvas.matches?.(':hover') || canvas.parentElement?.matches?.(':hover'))) {
+          event.preventDefault();
+        }
+      }
+    });
+    win?.addEventListener('keyup', event => {
+      if (event.code === 'Space' || event.key === ' ' || event.keyCode === 32) {
+        spaceHeld = false;
+      }
+    });
+    win?.addEventListener('blur', () => { spaceHeld = false; });
+
     const touches = new Map();
-    const clearPointers = () => { touches.clear(); drag = null; renderer.set_grab_feedback(new Float32Array()); options.onGrabMove?.([]); };
+    const clearPointers = () => { touches.clear(); drag = null; spaceHeld = false; renderer.set_grab_feedback(new Float32Array()); options.onGrabMove?.([]); };
     const acceptsInput = attachViewportActivation(canvas, document.getElementById('viewport-exit'), clearPointers, () => !session && !stopped, report);
 
     canvas.addEventListener('pointerdown', event => {
@@ -498,8 +521,23 @@ export async function createViewer(canvas, button, status, options = {}) {
     canvas.addEventListener('wheel', event => {
       if (!acceptsInput() || touches.size || drag) return;
       event.preventDefault();
-      const delta = wheelTranslation(event, getCameraVectors(), canvas.clientHeight);
-      camPos = camPos.map((v, i) => v + delta[i]);
+      const isSpace = Boolean(event.spaceKey || event.space || spaceHeld);
+      const wheelEv = {
+        deltaX: event.deltaX,
+        deltaY: event.deltaY,
+        deltaMode: event.deltaMode,
+        shiftKey: event.shiftKey,
+        spaceKey: isSpace
+      };
+      if (isSpace) {
+        const rot = wheelRotation(wheelEv, canvas.clientHeight);
+        yaw += rot.yaw;
+        pitch = Math.max(-1.4, Math.min(1.4, pitch + rot.pitch));
+        roll += rot.roll;
+      } else {
+        const delta = wheelTranslation(wheelEv, getCameraVectors(), canvas.clientHeight);
+        camPos = camPos.map((v, i) => v + delta[i]);
+      }
       notifyPose();
     }, { passive: false });
 
@@ -518,6 +556,7 @@ export async function createViewer(canvas, button, status, options = {}) {
         camPos = [0, 0, 2];
         yaw = 0;
         pitch = 0;
+        roll = 0;
         drag = null;
         grab.reset();
         renderer.set_pose(0, 0, 0);

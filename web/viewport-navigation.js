@@ -50,7 +50,29 @@ export function solveTouchCamera(camera, basis, touches) {
 }
 
 export function wheelTranslation(event, basis, height) {
+  if (event.spaceKey || event.space) return [0, 0, 0];
   const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? height : 1;
   const axis = event.shiftKey ? basis.up : basis.forward;
   return axis.map((v, i) => 0.002 * unit * (basis.right[i] * event.deltaX - v * event.deltaY));
 }
+
+export function wheelRotation(event, heightOrBasis, maybeHeight) {
+  const height = typeof heightOrBasis === 'number' ? heightOrBasis : (typeof maybeHeight === 'number' ? maybeHeight : 500);
+  if (event.spaceKey === false || event.space === false) {
+    const res = [0, 0, 0];
+    res.yaw = 0; res.pitch = 0; res.roll = 0;
+    return res;
+  }
+  const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? height : 1;
+  const scale = 0.002 * unit;
+  const yaw = event.shiftKey ? 0 : scale * event.deltaX;
+  const pitch = -scale * event.deltaY;
+  const roll = event.shiftKey ? scale * event.deltaX : 0;
+  const res = [yaw, pitch, roll];
+  res.yaw = yaw;
+  res.pitch = pitch;
+  res.roll = roll;
+  return res;
+}
+
+export const wheelPan = wheelRotation;
